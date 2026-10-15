@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type { Session } from "@supabase/supabase-js";
 import {
   BookOpen,
   GraduationCap,
@@ -50,14 +51,22 @@ export default function App() {
     [notice, setNotice] = useState<Notice | null>(null),
     [search, setSearch] = useState(""),
     [busy, setBusy] = useState(false),
-    [dbConnected, setDbConnected] = useState(false);
+    [dbConnected, setDbConnected] = useState(false),
+    [session, setSession] = useState<Session | null>(null),
+    [userRole, setUserRole] = useState<string | null>(null),
+    [roleReady, setRoleReady] = useState(false),
+    [authReady, setAuthReady] = useState(!supabase);
+  const sessionRef = useRef<Session | null>(null);
+  const sessionGeneration = useRef(0);
   const [cn, setCn] = useState(""),
     [section, setSection] = useState("A"),
     [year, setYear] = useState("2026-27"),
     [name, setName] = useState(""),
     [code, setCode] = useState(""),
     [studentClass, setStudentClass] = useState(""),
-    [teacherClasses, setTeacherClasses] = useState<string[]>([]);
+    [teacherClasses, setTeacherClasses] = useState<string[]>([]),
+    [email, setEmail] = useState(""),
+    [password, setPassword] = useState("");
   function showNotice(message: string, kind: Notice["kind"] = "success") {
     setNotice({ message, kind });
   }
@@ -69,15 +78,28 @@ export default function App() {
       () => people.filter((p) => p.role === "teacher"),
       [people],
     );
+  function isCurrentSession(
+    generation: number,
+    currentSession: Session | null,
+  ) {
+    return (
+      sessionGeneration.current === generation &&
+      sessionRef.current === currentSession
+    );
+  }
   async function refresh() {
-    if (!supabase) {
+    if (!supabase || !session) {
       setDbConnected(false);
-      showNotice(
-        configurationError || "Supabase is not configured.",
-        "error",
-      );
+      if (!supabase) {
+        showNotice(
+          configurationError || "Supabase is not configured.",
+          "error",
+        );
+      }
       return;
     }
+    const currentSession = session;
+    const generation = sessionGeneration.current;
     setBusy(true);
     try {
       const [c, p, a] = await Promise.all([
@@ -89,6 +111,7 @@ export default function App() {
         supabase.from("teacher_classes").select("teacher_id,class_id"),
       ]);
       const err = c.error || p.error || a.error;
+      if (!isCurrentSession(generation, currentSession)) return;
       if (err) {
         setDbConnected(false);
         showNotice(databaseError(err), "error");
@@ -111,18 +134,111 @@ export default function App() {
       }
       setAssignments(m);
     } catch (error) {
+      if (!isCurrentSession(generation, currentSession)) return;
       setDbConnected(false);
       showNotice(caughtError(error), "error");
+    } finally {
+      if (isCurrentSession(generation, currentSession)) setBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    const generation = sessionGeneration.current;
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (active && sessionGeneration.current === generation) {
+          sessionRef.current = data.session;
+          setSession(data.session);
+          setUserRole(null);
+          setRoleReady(false);
+          setAuthReady(true);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active && sessionGeneration.current === generation) {
+          showNotice(caughtError(error), "error");
+          setAuthReady(true);
+        }
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      sessionGeneration.current += 1;
+      sessionRef.current = nextSession;
+      setBusy(false);
+      setSession(nextSession);
+      setUserRole(null);
+      setRoleReady(false);
+      setAuthReady(true);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+  useEffect(() => {
+    if (!session || !supabase) return;
+    let active = true;
+    const currentSession = session;
+    const generation = sessionGeneration.current;
+    void (async () => {
+      try {
+        const { data, error } = await supabase.rpc("current_user_role");
+        if (!active || !isCurrentSession(generation, currentSession)) return;
+        if (error) {
+          setUserRole(null);
+          showNotice(databaseError(error), "error");
+        } else {
+          setUserRole(data as string | null);
+        }
+        setRoleReady(true);
+      } catch (error) {
+        if (!active || !isCurrentSession(generation, currentSession)) return;
+        setUserRole(null);
+        setRoleReady(true);
+        showNotice(caughtError(error), "error");
+      }
+    })();
+    void refresh();
+    return () => {
+      active = false;
+    };
+  }, [session]);
+  async function signIn(e: FormEvent) {
+    e.preventDefault();
+    if (!supabase) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) showNotice(`Sign-in failed: ${error.message}`, "error");
+    } catch (error) {
+      showNotice(`Sign-in failed: ${caughtError(error)}`, "error");
     } finally {
       setBusy(false);
     }
   }
-  useEffect(() => {
-    void refresh();
-  }, []);
+  async function signOut() {
+    if (!supabase) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) showNotice(`Sign-out failed: ${error.message}`, "error");
+    } catch (error) {
+      showNotice(`Sign-out failed: ${caughtError(error)}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function addClass(e: FormEvent) {
     e.preventDefault();
-    if (!supabase) return;
+    if (!supabase || userRole !== "administrator") return;
     const className = cn.trim();
     const classSection = section.trim();
     const validationError = validateClassInput(className, classSection);
@@ -152,7 +268,7 @@ export default function App() {
   }
   async function addPerson(e: FormEvent, role: "student" | "teacher") {
     e.preventDefault();
-    if (!supabase) return;
+    if (!supabase || userRole !== "administrator") return;
     const personName = name.trim();
     const identifier = code.trim();
     const validationError = validatePersonInput(
@@ -211,7 +327,7 @@ export default function App() {
     }
   }
   async function activeToggle(p: Person) {
-    if (!supabase) return;
+    if (!supabase || userRole !== "administrator") return;
     setBusy(true);
     try {
       const { error } = await supabase
@@ -248,6 +364,76 @@ export default function App() {
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+  if (!configured) {
+    return (
+      <div className="auth-shell">
+        <section className="auth-card">
+          <div className="logo"><Fingerprint /></div>
+          <p className="eyebrow">CAMPUSID ADMINISTRATION</p>
+          <h1>Connect your Supabase project</h1>
+          <p>{configurationError}</p>
+        </section>
+      </div>
+    );
+  }
+  if (!authReady) {
+    return <div className="auth-shell"><p>Loading sign-in…</p></div>;
+  }
+  if (!session) {
+    return (
+      <div className="auth-shell">
+        <form className="auth-card" onSubmit={signIn}>
+          <div className="logo"><Fingerprint /></div>
+          <p className="eyebrow">CAMPUSID ADMINISTRATION</p>
+          <h1>Sign in to continue</h1>
+          <p>Use an authorized administrator or teacher account.</p>
+          <label>
+            Email
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+          {notice && <div className={`notice ${notice.kind}`}>{notice.message}</div>}
+          <button className="primary" disabled={busy}>Sign in</button>
+        </form>
+      </div>
+    );
+  }
+  if (!roleReady) {
+    return <div className="auth-shell"><p>Checking account permissions…</p></div>;
+  }
+  if (!userRole) {
+    return (
+      <div className="auth-shell">
+        <section className="auth-card">
+          <div className="logo"><ShieldCheck /></div>
+          <p className="eyebrow">CAMPUSID ADMINISTRATION</p>
+          <h1>Account not provisioned</h1>
+          <p>
+            This Auth account does not have an administrator or teacher role.
+            Ask the project owner to assign one, then sign in again.
+          </p>
+          <button className="primary" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </section>
+      </div>
+    );
+  }
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -260,7 +446,7 @@ export default function App() {
             <small>ATTENDANCE SYSTEM</small>
           </div>
         </div>
-        <p className="navlabel">WORKSPACE</p>
+        <p className="navlabel">ADMINISTRATION</p>
         {(
           [
             ["overview", "Overview", LayoutDashboard],
@@ -279,19 +465,22 @@ export default function App() {
           </button>
         ))}
         <div className="device">
-          <span className="dot" />
+          <span className="dot offline" />
           <div>
-            <b>Fingerprint terminal</b>
-            <small>ESP32 · R307</small>
+            <b>Terminal integration</b>
+            <small>Hardware not connected</small>
           </div>
-          <em>DEMO</em>
+          <em>PLANNED</em>
         </div>
         <div className="admin">
-          <span>AD</span>
+          <span>{userRole === "administrator" ? "AD" : "TC"}</span>
           <div>
-            <b>Administrator</b>
-            <small>Admin workspace</small>
+            <b>{userRole === "administrator" ? "Administrator" : "Teacher"}</b>
+            <small>{session.user.email}</small>
           </div>
+          <button className="signout" onClick={() => void signOut()}>
+            Sign out
+          </button>
         </div>
       </aside>
       <main>
@@ -307,16 +496,24 @@ export default function App() {
                 ? "Database unavailable"
                 : "Database not configured"}
           </label>
-          <button className="refresh" onClick={() => void refresh()}>
+          <button
+            className="refresh"
+            onClick={() => void refresh()}
+            aria-label="Refresh database data"
+            title="Refresh database data"
+          >
             <RefreshCw size={16} />
           </button>
         </header>
         <div className="content">
           <div className="heading">
             <div>
-              <small>ADMIN CONSOLE</small>
+              <small>COLLEGE RECORDS</small>
               <h1>{title}</h1>
-              <p>Manage classes, people and fingerprint enrollment records.</p>
+              <p>
+                Maintain the people and class records used by the attendance
+                system.
+              </p>
             </div>
           </div>
           {!configured && (
@@ -360,8 +557,11 @@ export default function App() {
                 ))}
               </div>
               <div className="panel">
-                <h2>Quick actions</h2>
-                <p className="muted">Set up your demo in this order.</p>
+                <h2>Start with the records</h2>
+                <p className="muted">
+                  Create classes first, then register the people assigned to
+                  them.
+                </p>
                 <div className="actions">
                   <button onClick={() => setTab("classes")}>
                     <BookOpen />
@@ -376,7 +576,7 @@ export default function App() {
                     Register a teacher <span>→</span>
                   </button>
                 </div>
-                <h2>System checklist</h2>
+                <h2>System status</h2>
                 <p>{dbConnected ? "✓" : "○"} Supabase connection</p>
                 <p>
                   {classes.length ? "✓" : "○"} Create classes ({classes.length})
@@ -386,7 +586,7 @@ export default function App() {
                   students and teachers
                 </p>
                 <p>
-                  ○ Connect real ESP32/R307 fingerprint enrollment (next step)
+                  ○ Fingerprint terminal integration is not configured
                 </p>
               </div>
             </>
@@ -395,6 +595,9 @@ export default function App() {
             <section className="panel">
               <h2>Add a class</h2>
               <p className="muted">Create classes before assigning people.</p>
+              {userRole !== "administrator" && (
+                <p className="muted">Only administrators can manage records.</p>
+              )}
               <form onSubmit={addClass} className="form classform">
                 <label>
                   Class name
@@ -422,7 +625,10 @@ export default function App() {
                     placeholder="2026-27"
                   />
                 </label>
-                <button className="primary" disabled={busy || !configured}>
+                <button
+                  className="primary"
+                  disabled={busy || userRole !== "administrator"}
+                >
                   <Plus size={16} /> Add class
                 </button>
               </form>
@@ -539,7 +745,7 @@ export default function App() {
                   )}
                   <button
                     className="primary"
-                    disabled={busy || !configured || !classes.length}
+                    disabled={busy || userRole !== "administrator" || !classes.length}
                   >
                     <Plus size={16} /> Register{" "}
                     {tab === "students" ? "student" : "teacher"}
@@ -610,6 +816,7 @@ export default function App() {
                             <button
                               className="outline"
                               onClick={() => void activeToggle(p)}
+                              disabled={busy}
                             >
                               {p.active ? "Deactivate" : "Activate"}
                             </button>

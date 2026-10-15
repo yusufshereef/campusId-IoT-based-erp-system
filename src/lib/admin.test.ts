@@ -31,6 +31,25 @@ describe("admin validation", () => {
       validatePersonInput("teacher", "Ada", "E1", "", ["class-1"]),
     ).toBeNull();
   });
+
+  it("accepts surrounding whitespace when the submitted values are non-empty", () => {
+    expect(validateClassInput(" CSE ", " A ")).toBeNull();
+    expect(
+      validatePersonInput("student", " Ada ", " R1 ", "class-1", []),
+    ).toBeNull();
+    expect(
+      validatePersonInput("teacher", " Ada ", " E1 ", "", ["class-1"]),
+    ).toBeNull();
+  });
+
+  it("requires a name before checking role-specific assignments", () => {
+    expect(validatePersonInput("student", "", "R1", "class-1", [])).toBe(
+      "Student name and roll number are required.",
+    );
+    expect(validatePersonInput("teacher", " ", "E1", "", ["class-1"])).toBe(
+      "Teacher name and employee ID are required.",
+    );
+  });
 });
 
 describe("database error messages", () => {
@@ -56,9 +75,22 @@ describe("database error messages", () => {
     expect(databaseError({ code, message: "database detail" })).toBe(message);
   });
 
+  it("handles missing, permission, and unknown database errors", () => {
+    expect(databaseError(null)).toBe("");
+    expect(
+      databaseError({ code: "42501", message: "permission denied" }),
+    ).toBe("The database rejected this request. Check the current RLS policies.");
+    expect(databaseError({ code: "99999", message: "database detail" })).toBe(
+      "database detail",
+    );
+  });
+
   it("reports unknown network failures without hiding them", () => {
     expect(caughtError(new Error("offline"))).toBe("Request failed: offline");
     expect(caughtError("offline")).toBe(
+      "Request failed. Check your connection and try again.",
+    );
+    expect(caughtError(null)).toBe(
       "Request failed. Check your connection and try again.",
     );
   });
