@@ -1,0 +1,400 @@
+# CampusID local setup
+
+This guide is the entry point for a new developer setting up CampusID from a
+fresh clone. It covers the React/Vite application and the optional disposable
+Supabase environment used for security verification.
+
+Do not use the configured application Supabase project for disposable SQL
+tests. Do not put a Supabase `service_role`/secret key in browser environment
+variables, source files, or this repository.
+
+## Project status
+
+CampusID is a React 18, TypeScript, Vite, and Supabase college ERP prototype.
+The current browser application implements:
+
+- Supabase Auth password sign-in and sign-out.
+- Administrator and assignment-scoped teacher role lookup.
+- Class creation and listing.
+- Student registration and class assignment.
+- Teacher registration and teacher-class assignment.
+- Search, activation/deactivation, and fingerprint-status display.
+- Explicit configuration, loading, success, and error states.
+
+The following are intentionally incomplete or unverified:
+
+- Attendance sessions and attendance recording are not implemented.
+- Physical ESP32-WROOM-32/R307S enrollment is not implemented.
+- Device authentication and a backend terminal service are not implemented.
+- Offline persistence and synchronization are not implemented.
+- Browser access to fingerprint mappings is intentionally blocked.
+- Supabase SQL integration tests have passed in the disposable local
+  environment; deployed database security remains unverified.
+- Hosted/deployed database grants, policies, function ownership, and effective
+  `search_path` remain unverified.
+
+Read [docs/ENGINEERING_PLAN.md](./docs/ENGINEERING_PLAN.md) before changing
+the security foundation or starting a new milestone.
+
+## Prerequisites
+
+### Application development
+
+- Node.js 20.19+ or 22.12+, matching the existing project documentation.
+- npm. The repository includes `package-lock.json`; use npm rather than
+  another package manager for reproducible installs.
+- Git.
+- A Supabase project configured separately for development, or a local
+  Supabase stack if database access is needed.
+
+The versions observed during this setup review were Node.js `v26.5.1`, npm
+`11.17.0`, and Git `2.54.0`. Node 26 is not the project's documented support
+floor, so use Node 20.19+ or 22.12+ for a supported setup unless the project
+compatibility policy is updated.
+
+### Disposable local Supabase tests
+
+Only needed for SQL integration verification:
+
+- Docker with a running Docker daemon.
+- Supabase CLI.
+- `psql`.
+
+The local stack must be isolated from the application repository and must not
+use hosted-project credentials. The repository's detailed test instructions
+are in [supabase/test/README.md](./supabase/test/README.md).
+
+## Clone and install
+
+Clone the repository and enter its directory:
+
+```bash
+git clone <repository-url> erp-fingerprint
+cd erp-fingerprint
+```
+
+Install exactly from the committed lockfile:
+
+```bash
+npm ci
+```
+
+Use `npm install` only when intentionally changing dependencies and updating
+`package-lock.json`. Do not delete the lockfile to resolve an installation
+problem.
+
+## Configure environment variables
+
+The source reads only these optional Vite variables:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+```
+
+They are declared in [src/vite-env.d.ts](./src/vite-env.d.ts) and consumed by
+[src/lib/supabase.ts](./src/lib/supabase.ts). Without both values, the app
+starts but displays a Supabase configuration error and cannot authenticate or
+load database data.
+
+Create an ignored local file from the example:
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` locally and replace both placeholders with values from the
+Supabase environment you intentionally selected. Never print the file, paste
+its contents into chat, commit it, or expose a `service_role`/secret key.
+`.env.local` is ignored by Git.
+
+### Hosted development project
+
+For a separately configured hosted development project, obtain its Project URL
+and publishable/anon key from that project's Supabase dashboard. Put only
+those two public-client values in `.env.local`:
+
+```text
+VITE_SUPABASE_URL=<hosted-development-project-url>
+VITE_SUPABASE_ANON_KEY=<hosted-development-publishable-or-anon-key>
+```
+
+The hosted project's schema and migrations must be applied manually in its
+SQL Editor only after a separate deployment decision. This guide does not
+authorize applying migrations to the existing application project.
+
+### Local Supabase stack
+
+For local database work, do not use hosted values. Initialize the Supabase
+CLI in a temporary directory outside this repository, for example:
+
+```bash
+TEST_DIR="/tmp/campusid-supabase-disposable"
+mkdir -p "$TEST_DIR"
+cd "$TEST_DIR"
+supabase init
+supabase start
+```
+
+Obtain local connection values only from the local CLI:
+
+```bash
+DB_URL="$(supabase status -o env | sed -n 's/^DB_URL=//p')"
+test -n "$DB_URL"
+```
+
+Use the local stack's URL and public client values only for the disposable
+environment. Do not read `.env.local` from the application repository for
+this purpose, and do not substitute the existing hosted project's URL or
+credentials. Stop the stack when finished:
+
+```bash
+supabase stop
+```
+
+Restart Vite after changing `.env.local`; Vite reads environment variables at
+startup.
+
+## Run the application
+
+Start the development server from the repository root:
+
+```bash
+npm run dev
+```
+
+Vite prints the local URL, normally:
+
+```text
+http://localhost:5173
+```
+
+Open the printed URL in a browser. A configured Supabase environment is
+required for sign-in and database-backed workflows. Create Auth users through
+the selected development Supabase environment; the database security model
+does not create a public administrator automatically.
+
+## Database initialization order
+
+The repository SQL files are intentionally separate from the Supabase CLI
+migration layout. Apply them in this exact order in a disposable or approved
+development Supabase environment:
+
+1. [supabase/schema.sql](./supabase/schema.sql)
+2. [supabase/migrations/20261010234000_register_teacher_with_classes.sql](./supabase/migrations/20261010234000_register_teacher_with_classes.sql)
+3. [supabase/migrations/20261015223000_secure_auth_and_rls.sql](./supabase/migrations/20261015223000_secure_auth_and_rls.sql)
+4. [supabase/migrations/20261015233000_least_privilege_table_grants.sql](./supabase/migrations/20261015233000_least_privilege_table_grants.sql)
+5. Provision the first administrator manually in `public.user_roles`.
+
+The baseline creates the tables, constraints, RLS, grants, helper functions,
+and role storage. The first migration defines the transactional teacher
+registration RPC. The security migration reasserts the final authorization
+model and RPC permissions.
+
+`supabase db reset` alone does not apply these files because this repository
+does not currently contain the CLI-standard `supabase/migrations` directory.
+Do not apply these files to the existing hosted project as part of local
+setup.
+
+## Disposable Supabase security verification
+
+Run this only against a disposable local Supabase stack. Docker, the Supabase
+CLI, and `psql` are required. The safest workflow uses a temporary CLI
+directory such as `/tmp/campusid-supabase-disposable`, not the application
+repository.
+
+From the application repository, after starting the temporary local stack and
+obtaining its local `DB_URL`:
+
+```bash
+APP_DIR="$(pwd)"
+
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/schema.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/migrations/20261010234000_register_teacher_with_classes.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/migrations/20261015223000_secure_auth_and_rls.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/migrations/20261015233000_least_privilege_table_grants.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/test/isolated-admin-workflow.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/test/security-rls-workflow.sql"
+```
+
+The required test order is:
+
+1. Apply the baseline schema.
+2. Apply the first RPC migration.
+3. Apply the security migration.
+4. Run `isolated-admin-workflow.sql`.
+5. Run `security-rls-workflow.sql`.
+6. Run the effective-state catalog queries in
+   [supabase/test/README.md](./supabase/test/README.md).
+
+The catalog queries inspect table grants, routine execution privileges, RLS
+policies, schema privileges, function owners, `SECURITY DEFINER`, and
+function `search_path`. Expected evidence includes no anonymous table/RPC
+access, administrator-only writes, class-scoped teacher reads, blocked
+fingerprint-mapping browser access, trusted function ownership, and
+`search_path=pg_catalog, public`.
+
+Do not claim the security tests passed unless both SQL files actually complete
+successfully in the disposable local Supabase environment and the catalog
+results have been reviewed. The current local run completed both tests with
+exit code 0 and final `ROLLBACK`; this does not verify any hosted deployment.
+
+### Failure recovery and cleanup
+
+Every test script uses a transaction and ends with `ROLLBACK`. With `psql`,
+`-v ON_ERROR_STOP=1` stops execution at the first SQL error. If a command
+fails:
+
+1. Stop; do not run later setup or test commands.
+2. If using a persistent SQL session, run `ROLLBACK;` in that same session.
+3. Reset only the disposable local stack:
+   ```bash
+   supabase db reset
+   ```
+4. Reapply the baseline and all three timestamped SQL migrations in order.
+5. Rerun the two tests in order.
+
+A closed `psql` connection rolls back its open transaction, but a persistent
+SQL Editor session must be explicitly rolled back before retrying. Never use
+cleanup commands against the hosted application project.
+
+When finished with local verification, preserve the catalog output for review,
+then stop the temporary stack:
+
+```bash
+supabase stop
+```
+
+For the full SQL test limitations and catalog query text, read
+[supabase/test/README.md](./supabase/test/README.md).
+
+## Available validation commands
+
+These are the exact scripts in [package.json](./package.json):
+
+```bash
+npm test
+npm run build
+npx tsc -b --pretty false
+```
+
+- `npm test` runs Vitest in non-watch mode.
+- `npm run build` runs the TypeScript project build followed by `vite build`.
+- `npx tsc -b --pretty false` runs the TypeScript build check explicitly.
+- No `lint` script is configured in `package.json`; do not use or document
+  `npm run lint` unless a future change adds it.
+- `npm run preview` serves the already-built `dist` directory for a local
+  preview.
+
+## Troubleshooting
+
+### `npm ci` fails
+
+- Confirm the supported Node/npm versions.
+- Run `npm ci` from the repository root.
+- Do not delete `package-lock.json`.
+- If dependencies were partially installed, remove only the local
+  `node_modules` directory and retry.
+
+### The app says Supabase is not configured
+
+- Confirm `.env.local` exists at the repository root.
+- Confirm both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are non-empty.
+- Confirm the values belong to the selected development environment.
+- Restart `npm run dev`.
+- Never replace the missing values with a service-role key.
+
+### Sign-in succeeds but the account is not provisioned
+
+The Auth user also needs a corresponding `public.user_roles` row. The first
+administrator must be provisioned manually by an approved database owner.
+Do not grant administrator access to all authenticated users or through a
+client-controlled claim.
+
+### Database requests fail with permission errors
+
+- Confirm the baseline and all three SQL migrations were applied in order to the selected
+  development environment.
+- Confirm the signed-in user has the expected `administrator` or `teacher`
+  role.
+- For teachers, confirm the `person_id` and `teacher_classes` assignment.
+- Do not weaken RLS to make the browser work.
+- For local security testing, use the disposable stack and the catalog queries
+  in [supabase/test/README.md](./supabase/test/README.md).
+
+### Supabase CLI or Docker fails
+
+- Confirm Docker is installed and the daemon is running.
+- Run CLI commands from the temporary Supabase directory, not the application
+  repository.
+- Check `supabase status` for local service health.
+- Use `supabase db reset` only to reset the disposable local stack; it does
+  not apply the repository SQL files automatically.
+- Do not switch to the hosted project to bypass a local setup failure.
+
+### Build or TypeScript checks fail
+
+- Run `npm ci` again from the repository root.
+- Check the first TypeScript error rather than suppressing it.
+- Confirm the source changes are compatible with strict TypeScript settings.
+- Run `npm run build` after fixing the reported error.
+
+### SQL test stops partway through
+
+Do not continue in an aborted transaction. Run `ROLLBACK;` in the same
+persistent session, reset the disposable local stack if needed, and rerun the
+setup and tests from the beginning. Do not inspect or clean production data.
+
+## Repository structure and contribution workflow
+
+Important paths:
+
+```text
+src/
+  App.tsx                 Main application and Auth/data workflows
+  lib/admin.ts            Client validation and database error handling
+  lib/admin.test.ts       Vitest unit tests
+  lib/supabase.ts         Supabase client configuration
+  styles.css              Application styling
+supabase/
+  schema.sql              Secure baseline schema
+  migrations/             Timestamped SQL changes
+  test/                   Disposable security tests and instructions
+docs/
+  ENGINEERING_PLAN.md     Security-first project plan
+```
+
+Before a code or schema change:
+
+1. Read [docs/ENGINEERING_PLAN.md](./docs/ENGINEERING_PLAN.md).
+2. Inspect related source, migrations, tests, and documentation.
+3. Keep authorization enforced by the database, not only by UI visibility.
+4. Use timestamped migration names for schema/security changes and preserve
+   their reviewed order.
+5. Update directly related documentation.
+6. Run the smallest relevant validation, then the baseline commands where
+   practical:
+   ```bash
+   npm test
+   npm run build
+   npx tsc -b --pretty false
+   git diff --check
+   ```
+7. Report what was actually run. Do not claim SQL integration, hardware, or
+   production verification without evidence.
+
+Do not commit secrets, `.env.local`, generated build output, or temporary
+Supabase configuration. Keep unrelated worktree changes intact.
+
+## Scope boundaries
+
+Do not begin attendance, ESP32, R307S, biometric enrollment, or offline-sync
+implementation as part of local setup. Those milestones require separate
+design, authentication, persistence, and test plans after the security
+foundation has evidence of passing in a disposable environment.
