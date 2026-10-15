@@ -1,5 +1,5 @@
 -- Registers a teacher and all of its class assignments in one transaction.
--- Apply this migration before using the teacher registration form.
+-- The secure schema baseline defines the administrator authorization helper.
 create or replace function public.register_teacher_with_classes(
   p_full_name text,
   p_employee_id text,
@@ -7,12 +7,17 @@ create or replace function public.register_teacher_with_classes(
 )
 returns uuid
 language plpgsql
-security invoker
-set search_path = public
+security definer
+set search_path = pg_catalog, public
 as $$
 declare
   teacher_id uuid;
 begin
+  if auth.uid() is null or not public.is_administrator() then
+    raise exception 'Administrator access is required'
+      using errcode = '42501';
+  end if;
+
   if length(trim(coalesce(p_full_name, ''))) = 0
      or length(trim(coalesce(p_employee_id, ''))) = 0
      or coalesce(cardinality(p_class_ids), 0) = 0 then
@@ -45,5 +50,7 @@ begin
 end;
 $$;
 
+revoke all on function public.register_teacher_with_classes(text, text, uuid[])
+  from public, anon, authenticated;
 grant execute on function public.register_teacher_with_classes(text, text, uuid[])
-  to anon, authenticated;
+  to authenticated;

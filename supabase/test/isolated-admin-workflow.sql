@@ -18,11 +18,23 @@ $$;
 
 do $$
 declare
+  admin_user uuid := gen_random_uuid();
   class_a uuid;
   class_b uuid;
-  teacher_id uuid;
+  registered_teacher_id uuid;
   assignment_count integer;
 begin
+  insert into auth.users (id, aud, role, email)
+  values (
+    admin_user,
+    'authenticated',
+    'authenticated',
+    'qa-isolated-admin-20261015@example.invalid'
+  );
+
+  insert into public.user_roles (user_id, role)
+  values (admin_user, 'administrator');
+
   insert into public.classes (name, section, academic_year)
   values ('QA CampusID Test 20261010', 'A', 'isolated')
   returning id into class_a;
@@ -31,7 +43,14 @@ begin
   values ('QA CampusID Test 20261010', 'B', 'isolated')
   returning id into class_b;
 
-  teacher_id := public.register_teacher_with_classes(
+  set role authenticated;
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', admin_user::text, 'role', 'authenticated')::text,
+    true
+  );
+
+  registered_teacher_id := public.register_teacher_with_classes(
     'QA CampusID Test Teacher 20261010',
     'QA-TEACHER-20261010',
     array[class_a, class_b, class_a]::uuid[]
@@ -39,7 +58,7 @@ begin
 
   if not exists (
     select 1 from public.people
-    where id = teacher_id
+    where id = registered_teacher_id
       and role = 'teacher'
       and employee_id = 'QA-TEACHER-20261010'
   ) then
@@ -48,7 +67,7 @@ begin
 
   select count(*) into assignment_count
   from public.teacher_classes
-  where public.teacher_classes.teacher_id = teacher_id
+  where public.teacher_classes.teacher_id = registered_teacher_id
     and public.teacher_classes.class_id in (class_a, class_b);
   if assignment_count <> 2 then
     raise exception 'expected exactly two teacher assignments, got %',
@@ -81,6 +100,8 @@ begin
       raise exception 'invalid class left a partial teacher record';
     end if;
   end;
+
+  reset role;
 end;
 $$;
 
