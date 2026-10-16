@@ -2,7 +2,7 @@
 
 An expo-focused IoT attendance prototype: a React + TypeScript workspace, Supabase authentication and PostgreSQL authorization, and an ESP32/R307S fingerprint terminal.
 
-**Working in source:** administrator and teacher sign-in, class/student/teacher registration, assignments, activation, search, manual attendance with corrections, and the Milestone 2 terminal health slice. Firmware still performs **local recognition only**; no attendance events, remote enrollment, or offline synchronization are connected.
+**Working in source:** administrator and teacher sign-in, class/student/teacher registration, assignments, activation, search, manual attendance with corrections, terminal health, and administrator-triggered remote fingerprint enrollment. Attendance events and offline synchronization remain out of scope.
 
 - [Implementation and design](docs/IMPLEMENTATION.md)
 - [Hardware feasibility and expo roadmap](docs/EXPO_ROADMAP.md)
@@ -52,10 +52,11 @@ In the **development project's** Supabase SQL Editor, paste and run each file se
 4. [`20261015233000_least_privilege_table_grants.sql`](supabase/migrations/20261015233000_least_privilege_table_grants.sql)
 5. [`20261016001000_attendance_records.sql`](supabase/migrations/20261016001000_attendance_records.sql)
 6. [`20261016180000_devices_and_heartbeat.sql`](supabase/migrations/20261016180000_devices_and_heartbeat.sql)
+7. [`20261016190000_remote_fingerprint_enrollment.sql`](supabase/migrations/20261016190000_remote_fingerprint_enrollment.sql)
 
 The standalone baseline creates the original tables; the timestamped migrations extend/harden them. Running migrations alone on an empty database is insufficient. For an existing project, inspect its applied schema before changing it. This review does not apply hosted migrations.
 
-Verify these tables exist: `classes`, `people`, `teacher_classes`, `fingerprint_mappings`, `user_roles`, `attendance_records`, `attendance_record_audit`, and `devices`. RLS must remain enabled; anonymous clients have no table access. The teacher-registration RPC is administrator-only. Fingerprint mappings and device secret hashes are inaccessible to the browser.
+Verify these tables exist: `classes`, `people`, `teacher_classes`, `fingerprint_mappings`, `user_roles`, `attendance_records`, `attendance_record_audit`, `devices`, and `device_commands`. RLS must remain enabled; anonymous clients have no table access. The teacher-registration and enrollment-command RPCs are administrator-only. Fingerprint mappings and device secret hashes are inaccessible to the browser.
 
 ### Provision the first administrator
 
@@ -113,6 +114,19 @@ at the gateway because it authenticates with the device-specific header:
 ```bash
 supabase functions deploy device-heartbeat --no-verify-jwt --project-ref YOUR_PROJECT_REF
 ```
+
+Deploy the device command function with the same gateway setting:
+
+```bash
+supabase functions deploy device-command --no-verify-jwt --project-ref YOUR_PROJECT_REF
+```
+
+The command function uses the same device-secret header. It polls and claims
+one `ENROLL_FINGERPRINT` command at a time, then acknowledges the sensor result.
+The terminal stores only the fingerprint template; raw images never leave the
+R307S sensor. Add the command URL from
+[`secrets.example.h`](firmware/campusid-terminal/secrets.example.h) to the
+ignored local `secrets.h`.
 
 Set the function's standard `SUPABASE_URL` and
 `SUPABASE_SERVICE_ROLE_KEY` secrets through the hosted Supabase function

@@ -27,6 +27,17 @@ export type Device = {
   pending_event_count: number;
 };
 
+export type EnrollmentStatus = {
+  person_id: string;
+  device_code: string | null;
+  display_name: string | null;
+  slot_id: number | null;
+  enrollment_status: "not_enrolled" | "in_progress" | "enrolled" | "failed";
+  command_id: string | null;
+  command_status: string | null;
+  error_message: string | null;
+};
+
 export type Tab =
   "overview" | "attendance" | "classes" | "students" | "teachers";
 export type Notice = { message: string; kind: "success" | "error" };

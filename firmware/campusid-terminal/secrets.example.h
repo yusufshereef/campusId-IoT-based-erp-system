@@ -5,6 +5,8 @@
 #define CAMPUSID_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 #define CAMPUSID_HEARTBEAT_URL \
   "https://YOUR_PROJECT.supabase.co/functions/v1/device-heartbeat"
+#define CAMPUSID_COMMAND_URL \
+  "https://YOUR_PROJECT.supabase.co/functions/v1/device-command"
 #define CAMPUSID_DEVICE_SECRET "GENERATE_A_LONG_RANDOM_DEVICE_SECRET"
 
 // Provide the CA certificate chain for the HTTPS endpoint. Do not use

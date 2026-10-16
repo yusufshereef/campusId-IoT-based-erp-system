@@ -2,28 +2,20 @@
 
 ## October 16 review: read before uploading
 
-The user's reported working TFT configuration differs from this combined
-firmware: **CS 5 / DC 2 / RESET 4 / MOSI 23 / CLK 18 / MISO 19**, with the
-explicit six-argument Adafruit constructor. This directory still uses **CS 27 /
-DC 4 / RESET -1** and hardware SPI. Its buzzer uses GPIO2, which conflicts with
-the working TFT DC. Do not combine the two pin maps without resolving that
-conflict. See the [hardware plan](../../docs/EXPO_ROADMAP.md) and reconstructed
-[standalone regression sketch](../tft-regression/tft-regression.ino).
-
-The current screens now use portrait rotation 0 to match their 240×320
-coordinates. Rejection feedback now holds its pulse for 180 ms, and poor
-fingerprint images take the removal/retry path. These source changes have not
-been compiled or physically verified in this review; Arduino CLI was unavailable.
+The verified TFT configuration is **CS 5 / DC 2 / RESET 4 / MOSI 23 /
+CLK 18 / MISO 19**, with the explicit six-argument Adafruit constructor.
+Rotation is 2 for the inverted portrait enclosure orientation. The buzzer is
+disabled because GPIO2 is the TFT DC pin, and the keypad is disabled.
 
 `DisplayAdapter::available()` means the library initialization ran. It cannot
 detect an unplugged/blank TFT, and software GPIO writes cannot prove that a
 physical LED or buzzer worked. Inspect the outputs during the physical test.
 
-This directory contains the standalone Arduino IDE firmware for the CampusID
-terminal. Phase 2 adds local R307S recognition only. It does **not** communicate
-with Supabase, create attendance records, authenticate a device, or synchronize
-events. Student mapping, authorized sessions, and attendance remain later
-phases.
+This directory contains the Arduino IDE firmware for the CampusID terminal.
+The current firmware performs local R307S recognition and uses an authenticated
+Supabase heartbeat/device-command channel. Remote enrollment stores templates
+inside the R307S and sends only enrollment metadata back to the backend. It
+does not create attendance records or synchronize attendance events.
 
 ## Hardware and display configuration
 
@@ -57,8 +49,15 @@ configuration is deliberately selected for another module.
    - Adafruit ILI9341
 5. Open `campusid-terminal.ino`. Keep all files in this directory so Arduino
    compiles the companion `.cpp` and `.h` modules.
-6. Compile and upload only after verifying the display controller, voltage,
+6. Copy `secrets.example.h` to the ignored `secrets.h` and set Wi-Fi,
+   heartbeat URL, device-command URL, device secret, and the HTTPS CA locally.
+7. Compile and upload only after verifying the display controller, voltage,
    ground, and pin wiring.
+
+During an enrollment command, the terminal displays the student name and
+two-capture instructions. The device polls the command endpoint approximately
+once per second while online, while the five-second heartbeat continues
+independently. Raw fingerprint images never leave the R307S.
 
 ## ESP32-side pin map
 
@@ -105,9 +104,9 @@ The firmware-side SPI mapping is:
 | --- | ---: | --- |
 | SCK | 18 | `SCK` or `CLK` |
 | MOSI | 23 | `MOSI`, `SDA`, or equivalent SPI data-in label |
-| CS | 27 | `CS` or `LCD_CS` |
-| Data/command | 4 | `DC`, `D/C`, or `RS` |
-| Reset | Not assigned | `RST`/`RESET` only if the module requires an external reset connection |
+| CS | 5 | `CS` or `LCD_CS` |
+| Data/command | 2 | `DC`, `D/C`, or `RS` |
+| Reset | 4 | `RST`/`RESET` |
 | Logic power | 3.3 V | `VCC` only after verifying the board's power requirements |
 | Ground | GND | `GND` |
 | Backlight | Separate suitable supply/control | `LED`/`BL` only according to module documentation |

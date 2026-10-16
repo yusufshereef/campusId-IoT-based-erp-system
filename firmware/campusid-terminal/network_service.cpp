@@ -12,8 +12,13 @@
 #define CAMPUSID_WIFI_SSID ""
 #define CAMPUSID_WIFI_PASSWORD ""
 #define CAMPUSID_HEARTBEAT_URL ""
+#define CAMPUSID_COMMAND_URL ""
 #define CAMPUSID_DEVICE_SECRET ""
 #define CAMPUSID_SUPABASE_ROOT_CA ""
+#endif
+
+#ifndef CAMPUSID_COMMAND_URL
+#define CAMPUSID_COMMAND_URL ""
 #endif
 
 namespace {
@@ -47,6 +52,11 @@ void NetworkService::update(bool sensor_ready, uint16_t pending_event_count) {
     setState(heartbeat_succeeded ? NetworkState::Online
                                  : NetworkState::Disconnected);
     next_heartbeat_ = millis() + HeartbeatIntervalMs;
+  }
+  if (hasValue(CAMPUSID_COMMAND_URL) &&
+      static_cast<int32_t>(millis() - next_command_poll_) >= 0) {
+    pollCommands();
+    next_command_poll_ = millis() + CommandPollIntervalMs;
   }
 }
 
@@ -115,6 +125,95 @@ bool NetworkService::sendHeartbeat(bool sensor_ready,
     return false;
   }
   return true;
+}
+
+bool NetworkService::takeEnrollmentCommand(EnrollmentCommand& command) {
+  if (!has_pending_command_) return false;
+  command = pending_command_;
+  has_pending_command_ = false;
+  return true;
+}
+
+bool NetworkService::sendCommandRequest(const String& payload,
+                                        String& response) {
+  WiFiClientSecure client;
+  client.setCACert(CAMPUSID_SUPABASE_ROOT_CA);
+  HTTPClient request;
+  if (!request.begin(client, CAMPUSID_COMMAND_URL)) return false;
+  request.setTimeout(HttpTimeoutMs);
+  request.addHeader("Content-Type", "application/json");
+  request.addHeader("X-CampusID-Device-Secret", CAMPUSID_DEVICE_SECRET);
+  const int status = request.POST(payload);
+  response = request.getString();
+  request.end();
+  return status >= 200 && status < 300;
+}
+
+namespace {
+String jsonString(const String& source, const char* key) {
+  const String marker = String("\"") + key + "\":\"";
+  const int start = source.indexOf(marker);
+  if (start < 0) return "";
+  String value;
+  bool escaped = false;
+  for (int index = start + marker.length(); index < source.length(); index++) {
+    const char character = source[index];
+    if (escaped) {
+      value += character;
+      escaped = false;
+    } else if (character == '\\') {
+      escaped = true;
+    } else if (character == '"') {
+      break;
+    } else {
+      value += character;
+    }
+  }
+  return value;
+}
+}
+
+void NetworkService::pollCommands() {
+  String payload = "{\"device_id\":\"";
+  payload += CAMPUSID_DEVICE_ID;
+  payload += "\",\"action\":\"poll\"}";
+  String response;
+  if (!sendCommandRequest(payload, response) ||
+      response.indexOf("\"command\":null") >= 0) {
+    return;
+  }
+  EnrollmentCommand command;
+  command.id = jsonString(response, "id");
+  command.person_id = jsonString(response, "person_id");
+  command.display_name = jsonString(response, "display_name");
+  if (command.id.length() > 0 && command.person_id.length() > 0) {
+    pending_command_ = command;
+    has_pending_command_ = true;
+  }
+}
+
+void NetworkService::completeEnrollment(const String& command_id, bool success,
+                                        uint16_t template_id,
+                                        const char* error_message) {
+  String payload = "{\"device_id\":\"";
+  payload += CAMPUSID_DEVICE_ID;
+  payload += "\",\"action\":\"complete\",\"command_id\":\"";
+  payload += command_id;
+  payload += "\",\"success\":";
+  payload += (success ? "true" : "false");
+  if (success) {
+    payload += ",\"template_id\":";
+    payload += String(template_id);
+  } else if (error_message) {
+    payload += ",\"error_message\":\"";
+    payload += error_message;
+    payload += "\"";
+  }
+  payload += "}";
+  String response;
+  if (!sendCommandRequest(payload, response)) {
+    Serial.println("Enrollment acknowledgement failed");
+  }
 }
 
 const char* networkStateName(NetworkState state) {

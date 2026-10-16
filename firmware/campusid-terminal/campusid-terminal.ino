@@ -17,6 +17,7 @@ enum class Screen { Home, Menu, HardwareTest, DeviceStatus, About };
 Screen screen = Screen::Home;
 uint8_t menu_index = 0;
 FingerprintState last_fingerprint_state = FingerprintState::Initializing;
+EnrollmentState last_enrollment_state = EnrollmentState::Idle;
 uint32_t last_fingerprint_diagnostic = 0;
 bool has_fingerprint_diagnostic = false;
 constexpr uint32_t FingerprintDiagnosticIntervalMs = 1000;
@@ -30,6 +31,8 @@ NetworkState last_network_state = NetworkState::Disabled;
 bool rendered_has_match = false;
 uint16_t rendered_template_id = 0;
 uint16_t rendered_confidence = 0;
+EnrollmentState rendered_enrollment_state = EnrollmentState::Idle;
+String active_enrollment_command_id;
 
 const char* menu_label(uint8_t index) {
   switch (index) {
@@ -52,9 +55,21 @@ void draw_home() {
   display.panel(10, 58, 220, 75);
   display.text(CAMPUSID_DEVICE_ID, 20, 70, 1, CampusIdDisplay::Accent);
   const FingerprintState state = fingerprint.state();
+  const EnrollmentState enrollment = fingerprint.enrollmentState();
   const char* title = "TERMINAL READY";
   uint16_t color = CampusIdDisplay::Success;
-  if (state == FingerprintState::Initializing) {
+  if (enrollment != EnrollmentState::Idle) {
+    title = enrollment == EnrollmentState::Success
+                ? "ENROLLMENT COMPLETE"
+                : enrollment == EnrollmentState::Failed
+                    ? "ENROLLMENT FAILED"
+                    : "ENROLL STUDENT";
+    color = enrollment == EnrollmentState::Success
+                ? CampusIdDisplay::Success
+                : enrollment == EnrollmentState::Failed
+                    ? CampusIdDisplay::Error
+                    : CampusIdDisplay::Accent;
+  } else if (state == FingerprintState::Initializing) {
     title = "INITIALIZING SENSOR";
     color = CampusIdDisplay::Warning;
   } else if (state == FingerprintState::Scanning) {
@@ -73,9 +88,19 @@ void draw_home() {
   }
   display.panel(10, 148, 220, 82, color);
   display.text(title, 20, 162, 1, CampusIdDisplay::Background);
-  display.text(fingerprintStateName(state), 20, 185, 1,
-               CampusIdDisplay::Background);
-  if (state == FingerprintState::Matched && has_last_match) {
+  if (enrollment != EnrollmentState::Idle) {
+    display.text(fingerprint.enrollmentName().c_str(), 20, 185, 1,
+                 CampusIdDisplay::Background);
+    display.text(enrollmentStateName(enrollment), 20, 208, 1,
+                 CampusIdDisplay::Background);
+  } else {
+    display.text(fingerprintStateName(state), 20, 185, 1,
+                 CampusIdDisplay::Background);
+  }
+  if (enrollment == EnrollmentState::Success) {
+    display.text("Template stored", 20, 216, 1,
+                 CampusIdDisplay::Background);
+  } else if (state == FingerprintState::Matched && has_last_match) {
     display.text("Template:", 20, 202, 1, CampusIdDisplay::Background);
     display.text(String(last_match.template_id).c_str(), 105, 202, 1,
                  CampusIdDisplay::Background);
@@ -163,6 +188,7 @@ void draw_about() {
 void render(bool force = false) {
   if (!display.available()) return;
   const FingerprintState fingerprint_state = fingerprint.state();
+  const EnrollmentState enrollment_state = fingerprint.enrollmentState();
   const bool match_changed =
       has_last_match != rendered_has_match ||
       (has_last_match &&
@@ -171,7 +197,7 @@ void render(bool force = false) {
   if (!force && has_rendered && screen == rendered_screen &&
       fingerprint_state == rendered_fingerprint_state &&
       network.state() == rendered_network_state && !match_changed) {
-    return;
+    if (fingerprint.enrollmentState() == rendered_enrollment_state) return;
   }
   if (screen == Screen::Home) draw_home();
   else if (screen == Screen::Menu) draw_menu();
@@ -182,6 +208,7 @@ void render(bool force = false) {
   rendered_screen = screen;
   rendered_fingerprint_state = fingerprint_state;
   rendered_network_state = network.state();
+  rendered_enrollment_state = fingerprint.enrollmentState();
   rendered_has_match = has_last_match;
   rendered_template_id = last_match.template_id;
   rendered_confidence = last_match.confidence;
@@ -251,6 +278,14 @@ void setup() {
 void loop() {
   bool redraw = false;
   network.update(fingerprint.state() == FingerprintState::Ready);
+  EnrollmentCommand command;
+  if (!fingerprint.enrollmentActive() &&
+      fingerprint.enrollmentState() == EnrollmentState::Idle &&
+      network.takeEnrollmentCommand(command)) {
+    active_enrollment_command_id = command.id;
+    fingerprint.beginEnrollment(command.display_name);
+    redraw = true;
+  }
   const uint32_t fingerprint_started = millis();
   fingerprint.update();
   const uint32_t fingerprint_duration = millis() - fingerprint_started;
@@ -268,6 +303,10 @@ void loop() {
     last_fingerprint_state = fingerprint_state;
     if (fingerprint_state == FingerprintState::NoMatch) {
       feedback.play(FeedbackKind::Rejected);
+    }
+    if (enrollment_state != last_enrollment_state) {
+      last_enrollment_state = enrollment_state;
+      redraw = true;
     }
     const bool diagnostic = fingerprint_state == FingerprintState::SensorUnavailable ||
                             fingerprint_state == FingerprintState::CommunicationError;
@@ -297,6 +336,21 @@ void loop() {
     Serial.println(match.confidence);
     Serial.println("FINGERPRINT MATCHED - local recognition only.");
     feedback.play(FeedbackKind::Success);
+    redraw = true;
+  }
+  bool enrollment_success;
+  uint16_t enrollment_template_id;
+  String enrollment_error;
+  if (fingerprint.takeEnrollmentResult(enrollment_success,
+                                       enrollment_template_id,
+                                       enrollment_error)) {
+    network.completeEnrollment(active_enrollment_command_id,
+                               enrollment_success, enrollment_template_id,
+                               enrollment_error.c_str());
+    if (enrollment_success) {
+      Serial.print("Enrollment complete: template_id=");
+      Serial.println(enrollment_template_id);
+    }
     redraw = true;
   }
   // Consume the new match before painting so the previous template never

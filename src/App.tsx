@@ -24,13 +24,23 @@ import {
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
 import { Overview } from "./components/Overview";
 import { DEVICE_REFRESH_INTERVAL_MS, deviceStatus } from "./lib/device_status";
-import type { CampusClass, Device, Person, Tab, Notice } from "./lib/types";
+import type {
+  CampusClass,
+  Device,
+  EnrollmentStatus,
+  Person,
+  Tab,
+  Notice,
+} from "./lib/types";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview"),
     [classes, setClasses] = useState<CampusClass[]>([]),
     [people, setPeople] = useState<Person[]>([]),
     [assignments, setAssignments] = useState<Record<string, string[]>>({}),
+    [enrollmentStatuses, setEnrollmentStatuses] = useState<
+      Record<string, EnrollmentStatus>
+    >({}),
     [device, setDevice] = useState<Device | null>(null),
     [deviceError, setDeviceError] = useState<string | null>(null),
     [notice, setNotice] = useState<Notice | null>(null),
@@ -92,7 +102,7 @@ export default function App() {
     const request = ++refreshGeneration.current;
     setBusy(true);
     try {
-      const [c, p, a, d] = await Promise.all([
+      const [c, p, a, d, e] = await Promise.all([
         supabase.from("classes").select("*").order("name"),
         supabase
           .from("people")
@@ -105,6 +115,7 @@ export default function App() {
             "id,device_code,display_name,last_seen_at,firmware_version,sensor_ready,pending_event_count",
           )
           .order("display_name"),
+        supabase.rpc("get_fingerprint_statuses"),
       ]);
       const err = c.error || p.error || a.error;
       if (
@@ -135,6 +146,11 @@ export default function App() {
       setAssignments(m);
       setDeviceError(d.error ? databaseError(d.error) : null);
       setDevice((d.data?.[0] as Device | undefined) || null);
+      const statusMap: Record<string, EnrollmentStatus> = {};
+      for (const status of (e.data || []) as EnrollmentStatus[]) {
+        statusMap[status.person_id] = status;
+      }
+      setEnrollmentStatuses(statusMap);
     } catch (error) {
       if (
         !isCurrentSession(generation, currentSession) ||
@@ -174,6 +190,7 @@ export default function App() {
       setAssignments({});
       setDevice(null);
       setDeviceError(null);
+      setEnrollmentStatuses({});
       setDbConnected(false);
       setNotice(null);
       setPassword("");
@@ -237,6 +254,14 @@ export default function App() {
       active = false;
     };
   }, [session?.user.id]);
+  const hasEnrollmentInProgress = Object.values(enrollmentStatuses).some(
+    (status) => status.enrollment_status === "in_progress",
+  );
+  useEffect(() => {
+    if (!session || !supabase || !hasEnrollmentInProgress) return;
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => window.clearInterval(timer);
+  }, [session?.user.id, hasEnrollmentInProgress]);
   useEffect(() => {
     if (!session || !supabase) return;
     const timer = window.setInterval(() => {
@@ -412,6 +437,36 @@ export default function App() {
         mutationPending.current = false;
         setBusy(false);
       }
+    }
+  }
+  async function requestEnrollment(person: Person) {
+    if (
+      !supabase ||
+      userRole !== "administrator" ||
+      !device ||
+      !terminalOnline ||
+      mutationPending.current
+    ) {
+      if (!terminalOnline) showNotice("Terminal offline.", "error");
+      return;
+    }
+    mutationPending.current = true;
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("create_enrollment_command", {
+        p_person_id: person.id,
+        p_device_id: device.id,
+      });
+      if (error) showNotice(databaseError(error), "error");
+      else {
+        showNotice(`Enrollment started for ${person.full_name}.`);
+        await refresh();
+      }
+    } catch (error) {
+      showNotice(caughtError(error), "error");
+    } finally {
+      mutationPending.current = false;
+      setBusy(false);
     }
   }
   function navigate(next: Tab) {
@@ -877,6 +932,14 @@ export default function App() {
                   <div>
                     <h2>Registered {tab}</h2>
                     <p className="muted">Search records and manage status.</p>
+                    {tab === "students" &&
+                      userRole === "administrator" &&
+                      !terminalOnline && (
+                        <p className="system-note">
+                          Terminal offline — fingerprint enrollment is
+                          unavailable.
+                        </p>
+                      )}
                   </div>
                   <label className="search">
                     <Search size={16} />
@@ -931,9 +994,52 @@ export default function App() {
                                   .join(", ") || "No classes"}
                           </td>
                           <td>
-                            <span className="fingerprint-status">
-                              {p.fingerprint_status.replace("_", " ")}
-                            </span>
+                            {(() => {
+                              const status = enrollmentStatuses[p.id];
+                              const enrollmentStatus =
+                                status?.enrollment_status ||
+                                p.fingerprint_status;
+                              return (
+                                <>
+                                  <span className="fingerprint-status">
+                                    {enrollmentStatus.replace("_", " ")}
+                                    {status?.slot_id
+                                      ? ` · Template #${status.slot_id}`
+                                      : ""}
+                                  </span>
+                                  {p.role === "student" &&
+                                    userRole === "administrator" &&
+                                    enrollmentStatus !== "enrolled" && (
+                                      <button
+                                        className="outline"
+                                        onClick={() =>
+                                          void requestEnrollment(p)
+                                        }
+                                        disabled={
+                                          busy ||
+                                          enrollmentStatus === "in_progress" ||
+                                          !terminalOnline
+                                        }
+                                        title={
+                                          terminalOnline
+                                            ? "Enroll fingerprint"
+                                            : "Terminal offline"
+                                        }
+                                      >
+                                        {enrollmentStatus === "failed"
+                                          ? "Retry enrollment"
+                                          : "Enroll fingerprint"}
+                                      </button>
+                                    )}
+                                  {enrollmentStatus === "failed" &&
+                                    status?.error_message && (
+                                      <small className="block">
+                                        {status.error_message}
+                                      </small>
+                                    )}
+                                </>
+                              );
+                            })()}
                           </td>
                           <td>
                             <span className={p.active ? "active" : "inactive"}>

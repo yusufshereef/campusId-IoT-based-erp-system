@@ -17,6 +17,17 @@ enum class FingerprintState {
   WaitingForRemoval,
 };
 
+enum class EnrollmentState {
+  Idle,
+  CaptureFirst,
+  WaitingForRemoval,
+  CaptureSecond,
+  CreatingModel,
+  StoringModel,
+  Success,
+  Failed,
+};
+
 struct FingerprintMatch {
   uint16_t template_id = 0;
   uint16_t confidence = 0;
@@ -30,12 +41,24 @@ class FingerprintService {
   void update();
   FingerprintState state() const { return state_; }
   bool takeMatch(FingerprintMatch& result);
+  void beginEnrollment(const String& display_name);
+  EnrollmentState enrollmentState() const { return enrollment_state_; }
+  const String& enrollmentName() const { return enrollment_name_; }
+  bool enrollmentActive() const {
+    return enrollment_state_ != EnrollmentState::Idle &&
+           enrollment_state_ != EnrollmentState::Success &&
+           enrollment_state_ != EnrollmentState::Failed;
+  }
+  bool takeEnrollmentResult(bool& success, uint16_t& template_id,
+                            String& error_message);
 
  private:
   static constexpr uint32_t RetryIntervalMs = 5000;
   static constexpr uint32_t PollIntervalMs = 250;
   static constexpr uint32_t RemovalPollIntervalMs = 250;
   static constexpr uint32_t ResultHoldMs = 700;
+  static constexpr uint32_t EnrollmentPollIntervalMs = 250;
+  static constexpr uint32_t EnrollmentResultHoldMs = 4000;
 
   HardwareSerial serial_;
   Adafruit_Fingerprint sensor_;
@@ -46,6 +69,13 @@ class FingerprintService {
   uint32_t next_retry_ = 0;
   uint32_t result_at_ = 0;
   bool removal_required_ = false;
+  EnrollmentState enrollment_state_ = EnrollmentState::Idle;
+  String enrollment_name_;
+  uint32_t next_enrollment_poll_ = 0;
+  uint32_t enrollment_result_at_ = 0;
+  uint16_t enrollment_template_id_ = 0;
+  String enrollment_error_;
+  bool enrollment_result_pending_ = false;
 
   bool verifyConnection();
   void setState(FingerprintState next);
@@ -53,6 +83,9 @@ class FingerprintService {
   void handleResultState();
   void handleRemoval();
   bool isCommunicationError(uint8_t result) const;
+  void updateEnrollment();
+  void failEnrollment(const char* message);
 };
 
 const char* fingerprintStateName(FingerprintState state);
+const char* enrollmentStateName(EnrollmentState state);
