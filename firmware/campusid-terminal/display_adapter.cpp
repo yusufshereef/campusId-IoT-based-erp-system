@@ -9,9 +9,11 @@ static Adafruit_ST7789 display(
     CampusIdPins::TftCs, CampusIdPins::TftDc, CampusIdPins::TftReset);
 #elif CAMPUSID_DISPLAY_ILI9341
 #include <Adafruit_ILI9341.h>
+// Hardware SPI on the verified ILI9341 pins. SPI.begin() below assigns
+// SCK/MOSI/MISO/CS; the 6-argument Adafruit constructor is software SPI
+// and was blocking the loop for ~3.7s per full-screen paint.
 static Adafruit_ILI9341 display(
-    CampusIdPins::TftCs, CampusIdPins::TftDc, CampusIdPins::TftMosi,
-    CampusIdPins::TftSck, CampusIdPins::TftReset, CampusIdPins::TftMiso);
+    CampusIdPins::TftCs, CampusIdPins::TftDc, CampusIdPins::TftReset);
 #endif
 
 bool DisplayAdapter::begin() {
@@ -20,7 +22,7 @@ bool DisplayAdapter::begin() {
 #if CAMPUSID_DISPLAY_ST7789
   display.init(CampusIdDisplay::Width, CampusIdDisplay::Height);
 #else
-  display.begin();
+  display.begin(8000000);
 #endif
   display.setRotation(CampusIdDisplay::Rotation);
   display.fillScreen(CampusIdDisplay::Background);

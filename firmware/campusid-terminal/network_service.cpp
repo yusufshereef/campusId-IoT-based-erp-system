@@ -25,6 +25,27 @@ namespace {
 bool hasValue(const char* value) {
   return value != nullptr && value[0] != '\0';
 }
+
+const char* wifiStatusName(int status) {
+  switch (status) {
+    case WL_IDLE_STATUS: return "idle";
+    case WL_NO_SSID_AVAIL: return "no ssid";
+    case WL_SCAN_COMPLETED: return "scan complete";
+    case WL_CONNECTED: return "connected";
+    case WL_CONNECT_FAILED: return "connect failed";
+    case WL_CONNECTION_LOST: return "connection lost";
+    case WL_DISCONNECTED: return "disconnected";
+    default: return "unknown";
+  }
+}
+
+void logWifiStatus(int status) {
+  Serial.print("WiFi status: ");
+  Serial.print(status);
+  Serial.print(" (");
+  Serial.print(wifiStatusName(status));
+  Serial.println(")");
+}
 }
 
 void NetworkService::begin() {
@@ -40,13 +61,29 @@ void NetworkService::begin() {
 void NetworkService::update(bool sensor_ready, uint16_t pending_event_count) {
   if (!configured()) return;
 
-  if (WiFi.status() != WL_CONNECTED) {
+  const int wifi_status = WiFi.status();
+  if (wifi_status != last_wifi_status_) {
+    last_wifi_status_ = wifi_status;
+    logWifiStatus(wifi_status);
+  }
+
+  if (wifi_status != WL_CONNECTED) {
+    wifi_associated_ = false;
     if (state_ == NetworkState::Online) setState(NetworkState::Disconnected);
     if (static_cast<int32_t>(millis() - next_reconnect_) >= 0) connect();
     return;
   }
 
+  if (!wifi_associated_) {
+    wifi_associated_ = true;
+    WiFi.setSleep(false);
+    Serial.print("WiFi associated in ");
+    Serial.print(millis() - wifi_begin_at_);
+    Serial.println(" ms");
+  }
+
   if (static_cast<int32_t>(millis() - next_heartbeat_) >= 0) {
+    Serial.println("Heartbeat starting");
     const bool heartbeat_succeeded =
         sendHeartbeat(sensor_ready, pending_event_count);
     setState(heartbeat_succeeded ? NetworkState::Online
@@ -76,9 +113,18 @@ void NetworkService::setState(NetworkState next) {
 }
 
 void NetworkService::connect() {
-  WiFi.disconnect();
+  const uint32_t now = millis();
+  // Do not abort the first association with disconnect()+begin(). That race
+  // left the radio in CONNECTING forever when the loop was also busy painting.
+  if (state_ == NetworkState::Connecting ||
+      state_ == NetworkState::Disconnected) {
+    WiFi.disconnect();
+  }
+  logWifiStatus(WiFi.status());
   WiFi.begin(CAMPUSID_WIFI_SSID, CAMPUSID_WIFI_PASSWORD);
-  next_reconnect_ = millis() + ReconnectIntervalMs;
+  wifi_begin_at_ = now;
+  wifi_associated_ = false;
+  next_reconnect_ = now + ReconnectIntervalMs;
   setState(NetworkState::Connecting);
 }
 

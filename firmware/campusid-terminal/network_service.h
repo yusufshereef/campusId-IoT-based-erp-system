@@ -36,6 +36,9 @@ class NetworkService {
   uint32_t next_reconnect_ = 0;
   uint32_t next_heartbeat_ = 0;
   uint32_t next_command_poll_ = 0;
+  uint32_t wifi_begin_at_ = 0;
+  int last_wifi_status_ = -1;
+  bool wifi_associated_ = false;
   EnrollmentCommand pending_command_;
   bool has_pending_command_ = false;
 
