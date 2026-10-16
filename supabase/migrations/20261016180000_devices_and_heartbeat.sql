@@ -32,7 +32,21 @@ grant select (
   updated_at
 ) on table public.devices to authenticated;
 
-drop policy if exists "authorized users read devices" on public.devices;
-create policy "authorized users read devices"
-  on public.devices for select to authenticated
-  using (public.is_administrator() or public.current_user_role() = 'teacher');
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'devices'
+      and policyname = 'authorized users read devices'
+  ) then
+    create policy "authorized users read devices"
+      on public.devices for select to authenticated
+      using (
+        public.is_administrator()
+        or public.current_user_role() = 'teacher'
+      );
+  end if;
+end
+$$;
