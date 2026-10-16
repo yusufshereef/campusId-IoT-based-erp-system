@@ -299,14 +299,11 @@ void loop() {
     redraw = true;
   }
   const FingerprintState fingerprint_state = fingerprint.state();
+  const EnrollmentState enrollment_state = fingerprint.enrollmentState();
   if (fingerprint_state != last_fingerprint_state) {
     last_fingerprint_state = fingerprint_state;
     if (fingerprint_state == FingerprintState::NoMatch) {
       feedback.play(FeedbackKind::Rejected);
-    }
-    if (enrollment_state != last_enrollment_state) {
-      last_enrollment_state = enrollment_state;
-      redraw = true;
     }
     const bool diagnostic = fingerprint_state == FingerprintState::SensorUnavailable ||
                             fingerprint_state == FingerprintState::CommunicationError;
@@ -325,6 +322,10 @@ void loop() {
       }
       redraw = fingerprint_state != FingerprintState::WaitingForRemoval;
     }
+  }
+  if (enrollment_state != last_enrollment_state) {
+    last_enrollment_state = enrollment_state;
+    redraw = true;
   }
   FingerprintMatch match;
   if (fingerprint.takeMatch(match)) {

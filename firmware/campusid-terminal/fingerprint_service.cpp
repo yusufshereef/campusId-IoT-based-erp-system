@@ -41,118 +41,6 @@ void FingerprintService::update() {
       next_retry_ = now + RetryIntervalMs;
       setState(FingerprintState::SensorUnavailable);
     }
-
-    void FingerprintService::beginEnrollment(const String& display_name) {
-      if (enrollment_state_ != EnrollmentState::Idle) return;
-      enrollment_name_ = display_name;
-      enrollment_error_ = "";
-      enrollment_template_id_ = 0;
-      enrollment_result_pending_ = false;
-      enrollment_state_ = EnrollmentState::CaptureFirst;
-      next_enrollment_poll_ = 0;
-      Serial.print("Enrollment started for: ");
-      Serial.println(enrollment_name_);
-    }
-
-    void FingerprintService::updateEnrollment() {
-      const uint32_t now = millis();
-      if (enrollment_state_ == EnrollmentState::Success ||
-          enrollment_state_ == EnrollmentState::Failed) {
-        if (now - enrollment_result_at_ >= EnrollmentResultHoldMs) {
-          enrollment_state_ = EnrollmentState::Idle;
-          setState(FingerprintState::Ready);
-        }
-        return;
-      }
-      if (static_cast<int32_t>(now - next_enrollment_poll_) < 0) return;
-      next_enrollment_poll_ = now + EnrollmentPollIntervalMs;
-      uint8_t result;
-      switch (enrollment_state_) {
-        case EnrollmentState::CaptureFirst:
-          result = sensor_.getImage();
-          if (result == FINGERPRINT_NOFINGER) return;
-          if (result != FINGERPRINT_OK) {
-            failEnrollment("First capture failed");
-            return;
-          }
-          if (sensor_.image2Tz(1) != FINGERPRINT_OK) {
-            failEnrollment("First scan could not be converted");
-            return;
-          }
-          enrollment_state_ = EnrollmentState::WaitingForRemoval;
-          return;
-        case EnrollmentState::WaitingForRemoval:
-          result = sensor_.getImage();
-          if (result == FINGERPRINT_NOFINGER) {
-            enrollment_state_ = EnrollmentState::CaptureSecond;
-          } else if (result == FINGERPRINT_PACKETRECIEVEERR) {
-            failEnrollment("Finger removal check failed");
-          }
-          return;
-        case EnrollmentState::CaptureSecond:
-          result = sensor_.getImage();
-          if (result == FINGERPRINT_NOFINGER) return;
-          if (result != FINGERPRINT_OK) {
-            failEnrollment("Second capture failed");
-            return;
-          }
-          if (sensor_.image2Tz(2) != FINGERPRINT_OK) {
-            failEnrollment("Second scan could not be converted");
-            return;
-          }
-          enrollment_state_ = EnrollmentState::CreatingModel;
-          return;
-        case EnrollmentState::CreatingModel:
-          if (sensor_.createModel() != FINGERPRINT_OK) {
-            failEnrollment("Scans did not match");
-            return;
-          }
-          enrollment_state_ = EnrollmentState::StoringModel;
-          return;
-        case EnrollmentState::StoringModel: {
-          if (sensor_.getTemplateCount() != FINGERPRINT_OK) {
-            failEnrollment("Could not inspect template storage");
-            return;
-          }
-          const uint16_t slot = sensor_.templateCount + 1;
-          if (slot == 0 || slot > sensor_.capacity) {
-            failEnrollment("Fingerprint storage is full");
-            return;
-          }
-          if (sensor_.storeModel(slot) != FINGERPRINT_OK) {
-            failEnrollment("Could not store fingerprint");
-            return;
-          }
-          enrollment_template_id_ = slot;
-          enrollment_result_pending_ = true;
-          enrollment_result_at_ = now;
-          enrollment_state_ = EnrollmentState::Success;
-          return;
-        }
-        default:
-          return;
-      }
-    }
-
-    void FingerprintService::failEnrollment(const char* message) {
-      enrollment_error_ = message;
-      enrollment_result_pending_ = true;
-      enrollment_result_at_ = millis();
-      enrollment_state_ = EnrollmentState::Failed;
-      Serial.print("Enrollment failed: ");
-      Serial.println(message);
-    }
-
-    bool FingerprintService::takeEnrollmentResult(bool& success,
-                                                  uint16_t& template_id,
-                                                  String& error_message) {
-      if (!enrollment_result_pending_) return false;
-      enrollment_result_pending_ = false;
-      success = enrollment_state_ == EnrollmentState::Success;
-      template_id = enrollment_template_id_;
-      error_message = enrollment_error_;
-      return true;
-    }
     return;
   }
   if (static_cast<int32_t>(now - next_poll_) < 0) return;
@@ -167,6 +55,118 @@ void FingerprintService::update() {
     next_poll_ = now + RemovalPollIntervalMs;
     handleRemoval();
   }
+}
+
+void FingerprintService::beginEnrollment(const String& display_name) {
+  if (enrollment_state_ != EnrollmentState::Idle) return;
+  enrollment_name_ = display_name;
+  enrollment_error_ = "";
+  enrollment_template_id_ = 0;
+  enrollment_result_pending_ = false;
+  enrollment_state_ = EnrollmentState::CaptureFirst;
+  next_enrollment_poll_ = 0;
+  Serial.print("Enrollment started for: ");
+  Serial.println(enrollment_name_);
+}
+
+void FingerprintService::updateEnrollment() {
+  const uint32_t now = millis();
+  if (enrollment_state_ == EnrollmentState::Success ||
+      enrollment_state_ == EnrollmentState::Failed) {
+    if (now - enrollment_result_at_ >= EnrollmentResultHoldMs) {
+      enrollment_state_ = EnrollmentState::Idle;
+      setState(FingerprintState::Ready);
+    }
+    return;
+  }
+  if (static_cast<int32_t>(now - next_enrollment_poll_) < 0) return;
+  next_enrollment_poll_ = now + EnrollmentPollIntervalMs;
+  uint8_t result;
+  switch (enrollment_state_) {
+    case EnrollmentState::CaptureFirst:
+      result = sensor_.getImage();
+      if (result == FINGERPRINT_NOFINGER) return;
+      if (result != FINGERPRINT_OK) {
+        failEnrollment("First capture failed");
+        return;
+      }
+      if (sensor_.image2Tz(1) != FINGERPRINT_OK) {
+        failEnrollment("First scan could not be converted");
+        return;
+      }
+      enrollment_state_ = EnrollmentState::WaitingForRemoval;
+      return;
+    case EnrollmentState::WaitingForRemoval:
+      result = sensor_.getImage();
+      if (result == FINGERPRINT_NOFINGER) {
+        enrollment_state_ = EnrollmentState::CaptureSecond;
+      } else if (result == FINGERPRINT_PACKETRECIEVEERR) {
+        failEnrollment("Finger removal check failed");
+      }
+      return;
+    case EnrollmentState::CaptureSecond:
+      result = sensor_.getImage();
+      if (result == FINGERPRINT_NOFINGER) return;
+      if (result != FINGERPRINT_OK) {
+        failEnrollment("Second capture failed");
+        return;
+      }
+      if (sensor_.image2Tz(2) != FINGERPRINT_OK) {
+        failEnrollment("Second scan could not be converted");
+        return;
+      }
+      enrollment_state_ = EnrollmentState::CreatingModel;
+      return;
+    case EnrollmentState::CreatingModel:
+      if (sensor_.createModel() != FINGERPRINT_OK) {
+        failEnrollment("Scans did not match");
+        return;
+      }
+      enrollment_state_ = EnrollmentState::StoringModel;
+      return;
+    case EnrollmentState::StoringModel: {
+      if (sensor_.getTemplateCount() != FINGERPRINT_OK) {
+        failEnrollment("Could not inspect template storage");
+        return;
+      }
+      const uint16_t slot = sensor_.templateCount + 1;
+      if (slot == 0 || slot > sensor_.capacity) {
+        failEnrollment("Fingerprint storage is full");
+        return;
+      }
+      if (sensor_.storeModel(slot) != FINGERPRINT_OK) {
+        failEnrollment("Could not store fingerprint");
+        return;
+      }
+      enrollment_template_id_ = slot;
+      enrollment_result_pending_ = true;
+      enrollment_result_at_ = now;
+      enrollment_state_ = EnrollmentState::Success;
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+void FingerprintService::failEnrollment(const char* message) {
+  enrollment_error_ = message;
+  enrollment_result_pending_ = true;
+  enrollment_result_at_ = millis();
+  enrollment_state_ = EnrollmentState::Failed;
+  Serial.print("Enrollment failed: ");
+  Serial.println(message);
+}
+
+bool FingerprintService::takeEnrollmentResult(bool& success,
+                                              uint16_t& template_id,
+                                              String& error_message) {
+  if (!enrollment_result_pending_) return false;
+  enrollment_result_pending_ = false;
+  success = enrollment_state_ == EnrollmentState::Success;
+  template_id = enrollment_template_id_;
+  error_message = enrollment_error_;
+  return true;
 }
 
 void FingerprintService::handleReady() {
@@ -264,18 +264,18 @@ const char* fingerprintStateName(FingerprintState state) {
     case FingerprintState::WaitingForRemoval: return "waiting for finger removal";
     default: return "unknown";
   }
+}
 
-  const char* enrollmentStateName(EnrollmentState state) {
-    switch (state) {
-      case EnrollmentState::Idle: return "idle";
-      case EnrollmentState::CaptureFirst: return "place first finger";
-      case EnrollmentState::WaitingForRemoval: return "lift finger";
-      case EnrollmentState::CaptureSecond: return "place same finger again";
-      case EnrollmentState::CreatingModel: return "creating model";
-      case EnrollmentState::StoringModel: return "storing fingerprint";
-      case EnrollmentState::Success: return "enrollment complete";
-      case EnrollmentState::Failed: return "enrollment failed";
-      default: return "unknown";
-    }
+const char* enrollmentStateName(EnrollmentState state) {
+  switch (state) {
+    case EnrollmentState::Idle: return "idle";
+    case EnrollmentState::CaptureFirst: return "place first finger";
+    case EnrollmentState::WaitingForRemoval: return "lift finger";
+    case EnrollmentState::CaptureSecond: return "place same finger again";
+    case EnrollmentState::CreatingModel: return "creating model";
+    case EnrollmentState::StoringModel: return "storing fingerprint";
+    case EnrollmentState::Success: return "enrollment complete";
+    case EnrollmentState::Failed: return "enrollment failed";
+    default: return "unknown";
   }
 }
