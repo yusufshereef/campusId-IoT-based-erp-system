@@ -1,5 +1,11 @@
 # CampusID local setup
 
+> Historical setup notes retained for context. The maintained clone-to-development
+> instructions are now in [README.md](README.md). Read
+> [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for current behavior and
+> [docs/EXPO_ROADMAP.md](docs/EXPO_ROADMAP.md) for hardware decisions. In particular,
+> use Node 22.12+ (22.x), 24.x, or 26+, not the older Node requirement below.
+
 This guide is the entry point for a new developer setting up CampusID from a
 fresh clone. It covers the React/Vite application and the optional disposable
 Supabase environment used for security verification.
@@ -23,7 +29,10 @@ The current browser application implements:
 
 The following are intentionally incomplete or unverified:
 
-- Attendance sessions and attendance recording are not implemented.
+- Teacher attendance uses a client-side class/date session backed by
+  `attendance_records`; persistent attendance-session rows are not implemented.
+- The default attendance date is the browser's local calendar date because no
+  institution timezone is configured; select the date explicitly when needed.
 - Physical ESP32-WROOM-32/R307S enrollment is not implemented.
 - Device authentication and a backend terminal service are not implemented.
 - Offline persistence and synchronization are not implemented.
@@ -184,7 +193,8 @@ development Supabase environment:
 2. [supabase/migrations/20261010234000_register_teacher_with_classes.sql](./supabase/migrations/20261010234000_register_teacher_with_classes.sql)
 3. [supabase/migrations/20261015223000_secure_auth_and_rls.sql](./supabase/migrations/20261015223000_secure_auth_and_rls.sql)
 4. [supabase/migrations/20261015233000_least_privilege_table_grants.sql](./supabase/migrations/20261015233000_least_privilege_table_grants.sql)
-5. Provision the first administrator manually in `public.user_roles`.
+5. [supabase/migrations/20261016001000_attendance_records.sql](./supabase/migrations/20261016001000_attendance_records.sql)
+6. Provision the first administrator manually in `public.user_roles`.
 
 The baseline creates the tables, constraints, RLS, grants, helper functions,
 and role storage. The first migration defines the transactional teacher
@@ -218,9 +228,13 @@ psql "$DB_URL" -v ON_ERROR_STOP=1 \
 psql "$DB_URL" -v ON_ERROR_STOP=1 \
   -f "$APP_DIR/supabase/migrations/20261015233000_least_privilege_table_grants.sql"
 psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/migrations/20261016001000_attendance_records.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
   -f "$APP_DIR/supabase/test/isolated-admin-workflow.sql"
 psql "$DB_URL" -v ON_ERROR_STOP=1 \
   -f "$APP_DIR/supabase/test/security-rls-workflow.sql"
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f "$APP_DIR/supabase/test/attendance-workflow.sql"
 ```
 
 The required test order is:
@@ -228,9 +242,11 @@ The required test order is:
 1. Apply the baseline schema.
 2. Apply the first RPC migration.
 3. Apply the security migration.
-4. Run `isolated-admin-workflow.sql`.
-5. Run `security-rls-workflow.sql`.
-6. Run the effective-state catalog queries in
+4. Apply the attendance migration.
+5. Run `isolated-admin-workflow.sql`.
+6. Run `security-rls-workflow.sql`.
+7. Run `attendance-workflow.sql`.
+8. Run the effective-state catalog queries in
    [supabase/test/README.md](./supabase/test/README.md).
 
 The catalog queries inspect table grants, routine execution privileges, RLS
