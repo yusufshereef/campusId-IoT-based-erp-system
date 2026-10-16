@@ -62,9 +62,6 @@ void draw_home() {
   } else if (state == FingerprintState::NoMatch) {
     title = "NOT RECOGNIZED";
     color = CampusIdDisplay::Error;
-  } else if (state == FingerprintState::WaitingForRemoval) {
-    title = "REMOVE YOUR FINGER";
-    color = CampusIdDisplay::Warning;
   } else if (state == FingerprintState::SensorUnavailable ||
              state == FingerprintState::CommunicationError) {
     title = "SENSOR ERROR";
@@ -258,7 +255,7 @@ void loop() {
         last_fingerprint_diagnostic = now;
         has_fingerprint_diagnostic = true;
       }
-      redraw = true;
+      redraw = fingerprint_state != FingerprintState::WaitingForRemoval;
     }
   }
   FingerprintMatch match;
