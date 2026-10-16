@@ -64,6 +64,8 @@ declare
   student_one uuid := gen_random_uuid();
   student_two uuid := gen_random_uuid();
   student_three uuid := gen_random_uuid();
+  student_four uuid := gen_random_uuid();
+  second_device uuid := gen_random_uuid();
   command_one uuid;
   command_two uuid;
   command_three uuid;
@@ -74,36 +76,41 @@ begin
   insert into pg_temp.people (id, full_name, role, roll_number, class_id)
   values (student_one, 'Test One', 'student', 'test-1', gen_random_uuid()),
          (student_two, 'Test Two', 'student', 'test-2', gen_random_uuid()),
-         (student_three, 'Test Three', 'student', 'test-3', gen_random_uuid());
+         (student_three, 'Test Three', 'student', 'test-3', gen_random_uuid()),
+         (student_four, 'Test Four', 'student', 'test-4', gen_random_uuid());
+  insert into pg_temp.devices (id, device_code, display_name, secret_hash, last_seen_at)
+  values (second_device, 'capacity-test', 'Capacity test', repeat('1', 64), now());
 
   command_one := pg_temp.create_enrollment_command(student_one, test_device);
   assert pg_temp.create_enrollment_command(student_one, test_device) = command_one,
     'Duplicate create must return the same command';
   assert (select count(*) = 1 from pg_temp.device_commands), 'Duplicate command inserted';
-  answer := pg_temp.claim_device_command(test_device);
+  answer := pg_temp.claim_device_command(test_device, 64);
   assert answer ->> 'id' = command_one::text, 'Wrong command claimed';
-  assert pg_temp.claim_device_command(test_device) is null, 'Processing command re-claimed';
+  assert (answer ->> 'reserved_slot')::integer = 1, 'First slot was not reserved';
+  assert pg_temp.claim_device_command(test_device, 64) is null, 'Processing command re-claimed';
   assert (select enrollment_status = 'in_progress' and command_id = command_one
           from pg_temp.get_fingerprint_statuses() where person_id = student_one),
     'Reload did not rediscover active command';
   insert into enrollment_test_results values ('duplicate create / claim / reload', true, null);
 
-  answer := pg_temp.complete_device_command(command_one, test_device, true, 2);
+  answer := pg_temp.complete_device_command(command_one, test_device, true, 1);
   assert answer ->> 'status' = 'completed', 'Success completion failed';
-  answer := pg_temp.complete_device_command(command_one, test_device, true, 2);
+  answer := pg_temp.complete_device_command(command_one, test_device, true, 1);
   assert answer ->> 'status' = 'completed', 'Identical ACK retry failed';
   assert (select count(*) = 1 from pg_temp.fingerprint_mappings), 'Duplicate mapping';
-  answer := pg_temp.complete_device_command(command_one, test_device, true, 3);
+  answer := pg_temp.complete_device_command(command_one, test_device, true, 2);
   assert answer ->> 'status' = 'rejected', 'Conflicting slot accepted';
   answer := pg_temp.complete_device_command(command_one, test_device, false);
   assert answer ->> 'status' = 'rejected', 'Conflicting result accepted';
-  assert (select enrollment_status = 'enrolled' and slot_id = 2
+  assert (select enrollment_status = 'enrolled' and slot_id = 1
           from pg_temp.get_fingerprint_statuses() where person_id = student_one),
     'Status did not become enrolled';
   insert into enrollment_test_results values ('success / repeated ACK / conflicting ACK', true, null);
 
   command_two := pg_temp.create_enrollment_command(student_two, test_device);
-  perform pg_temp.claim_device_command(test_device);
+  answer := pg_temp.claim_device_command(test_device, 64);
+  assert (answer ->> 'reserved_slot')::integer = 2, 'Second slot was not reserved';
   answer := pg_temp.complete_device_command(command_two, test_device, false, null, 'Finger mismatch');
   assert answer ->> 'status' = 'failed', 'Failure completion failed';
   assert not exists (select 1 from pg_temp.fingerprint_mappings where person_id = student_two),
@@ -114,23 +121,52 @@ begin
   insert into enrollment_test_results values ('failure completion / failed status', true, null);
 
   command_two := pg_temp.create_enrollment_command(student_two, test_device);
-  perform pg_temp.claim_device_command(test_device);
+  answer := pg_temp.claim_device_command(test_device, 64);
+  assert (answer ->> 'reserved_slot')::integer = 2, 'Released slot was not reused';
   update pg_temp.device_commands set claimed_at = now() - interval '11 minutes'
   where id = command_two;
   perform pg_temp.get_fingerprint_statuses();
   assert (select status = 'failed' from pg_temp.device_commands where id = command_two),
     'Stale command remained processing';
-  answer := pg_temp.complete_device_command(command_two, test_device, true, 3);
+  assert (select reserved_slot = 2 from pg_temp.device_commands where id = command_two),
+    'Stale ACK reservation was released';
+  answer := pg_temp.complete_device_command(command_two, test_device, true, 2);
   assert answer ->> 'status' = 'completed', 'Late ACK for unchanged command failed';
   insert into enrollment_test_results values ('stale recovery / same-command late ACK', true, null);
 
   command_three := pg_temp.create_enrollment_command(student_three, test_device);
-  answer := pg_temp.claim_device_command(test_device);
-  assert answer -> 'reserved_slots' = '[2,3]'::jsonb, 'Mapped slots not reserved';
+  answer := pg_temp.claim_device_command(test_device, 64);
+  assert (answer ->> 'reserved_slot')::integer = 3, 'Next free slot was not reserved';
+  update pg_temp.device_commands set reserved_slot = 2 where id = command_three;
   answer := pg_temp.complete_device_command(command_three, test_device, true, 2);
   assert answer ->> 'status' = 'failed', 'Conflicting mapping accepted';
   assert (select count(*) = 2 from pg_temp.fingerprint_mappings), 'Mapping conflict changed rows';
   insert into enrollment_test_results values ('reserved slots / mapping collision', true, null);
+
+  command_three := pg_temp.create_enrollment_command(student_three, test_device);
+  answer := pg_temp.claim_device_command(test_device, 64);
+  assert (answer ->> 'reserved_slot')::integer = 3, 'Failed slot reservation was reused';
+  answer := pg_temp.complete_device_command(command_three, test_device, true, 3);
+  assert answer ->> 'status' = 'completed', 'Third enrollment failed';
+  insert into enrollment_test_results values ('third sequential slot allocation', true, null);
+
+  command_three := pg_temp.create_enrollment_command(student_four, test_device);
+  answer := pg_temp.claim_device_command(test_device, 3);
+  assert answer is null, 'Capacity boundary was exceeded';
+  assert (select status = 'failed' and error_message = 'Fingerprint storage full'
+          from pg_temp.device_commands where payload ->> 'person_id' = student_four::text),
+    'Full capacity did not fail the command';
+  insert into enrollment_test_results values ('capacity boundary', true, null);
+
+  command_three := pg_temp.create_enrollment_command(student_four, second_device);
+  answer := pg_temp.claim_device_command(second_device, 64);
+  assert (answer ->> 'reserved_slot')::integer = 1, 'Fresh device did not start at slot 1';
+  answer := pg_temp.complete_device_command(command_three, second_device, false, null,
+                                             'Poor image; try again');
+  assert answer ->> 'status' = 'failed', 'Pre-store failure did not complete';
+  assert (select reserved_slot is null from pg_temp.device_commands where id = command_three),
+    'Pre-store failure did not release reservation';
+  insert into enrollment_test_results values ('pre-store reservation release', true, null);
 end;
 $$;
 select * from enrollment_test_results order by test;

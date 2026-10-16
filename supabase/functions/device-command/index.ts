@@ -52,9 +52,17 @@ Deno.serve(async (request) => {
     success?: boolean;
     template_id?: number;
     error_message?: string;
+    sensor_capacity?: number;
   } | null;
   if (!body?.device_id || !["poll", "complete"].includes(body.action || "")) {
     return jsonResponse({ error: "Invalid command request" }, 400);
+  }
+  if (body.action === "poll" &&
+      (!Number.isInteger(body.sensor_capacity) ||
+        (body.sensor_capacity as number) < 1 ||
+        (body.sensor_capacity as number) > 1023)) {
+    // Keep older firmware from claiming work without a verified capacity.
+    return jsonResponse({ command: null });
   }
 
   const url = Deno.env.get("SUPABASE_URL");
@@ -73,7 +81,7 @@ Deno.serve(async (request) => {
 
   const rpc = body.action === "poll" ? "claim_device_command" : "complete_device_command";
   const parameters = body.action === "poll"
-    ? { p_device_id: device.id }
+    ? { p_device_id: device.id, p_capacity: body.sensor_capacity }
     : {
         p_command_id: body.command_id,
         p_device_id: device.id,

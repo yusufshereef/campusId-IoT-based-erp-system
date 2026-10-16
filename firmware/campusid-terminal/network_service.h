@@ -6,8 +6,7 @@ struct EnrollmentCommand {
   String id;
   String person_id;
   String display_name;
-  bool reservations_valid = false;
-  uint8_t reserved_slots[128] = {};
+  uint16_t reserved_slot = 0;
 };
 
 enum class NetworkState {
@@ -26,10 +25,11 @@ class NetworkService {
   bool heartbeatDue() const;
   void sendHeartbeat(bool sensor_ready, uint16_t pending_event_count = 0);
   bool commandPollDue() const;
-  void pollCommand();
+  void pollCommand(uint16_t sensor_capacity);
   NetworkState state() const { return state_; }
   bool online() const { return state_ == NetworkState::Online; }
   bool wifiConnected() const { return wifi_associated_; }
+  bool hasPendingEnrollmentCommand() const { return has_pending_command_; }
   bool takeEnrollmentCommand(EnrollmentCommand& command);
   EnrollmentAckResult completeEnrollment(const String& command_id, bool success,
                           uint16_t template_id = 0,
@@ -55,7 +55,7 @@ class NetworkService {
   void setState(NetworkState next);
   void connect();
   bool sendHeartbeatRequest(bool sensor_ready, uint16_t pending_event_count);
-  void pollCommands();
+  void pollCommands(uint16_t sensor_capacity);
   bool sendCommandRequest(const String& payload, String& response);
 };
 

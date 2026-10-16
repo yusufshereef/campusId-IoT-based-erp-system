@@ -19,6 +19,7 @@ enum class FingerprintState {
 
 enum class EnrollmentState {
   Idle,
+  PreparingEnrollment,
   CaptureFirst,
   ConvertFirstCapture,
   CheckExistingTemplate,
@@ -26,8 +27,6 @@ enum class EnrollmentState {
   CaptureSecond,
   ConvertSecondCapture,
   CreatingModel,
-  CheckingStorage,
-  ReadingStorageIndex,
   StoringModel,
   AwaitingAck,
   Success,
@@ -47,9 +46,10 @@ class FingerprintService {
   void update();
   FingerprintState state() const { return state_; }
   bool takeMatch(FingerprintMatch& result);
-  void beginEnrollment(const String& display_name,
-                       const uint8_t reserved_slots[128],
-                       bool reservations_valid);
+  bool beginEnrollment(const String& display_name, uint16_t reserved_slot);
+  bool resetFingerprintDatabase();
+  uint16_t capacity() const { return sensor_.capacity; }
+  uint16_t templateCount() const { return sensor_.templateCount; }
   EnrollmentState enrollmentState() const { return enrollment_state_; }
   const String& enrollmentName() const { return enrollment_name_; }
   bool enrollmentActive() const {
@@ -74,6 +74,7 @@ class FingerprintService {
   static constexpr uint32_t RemovalTimeoutMs = 20000;
   static constexpr uint32_t SecondFingerTimeoutMs = 60000;
   static constexpr uint32_t AckScreenTimeoutMs = 30000;
+  static constexpr uint32_t PreparingTimeoutMs = 5000;
 
   HardwareSerial serial_;
   Adafruit_Fingerprint sensor_;
@@ -90,13 +91,9 @@ class FingerprintService {
   uint32_t enrollment_result_at_ = 0;
   uint32_t enrollment_phase_at_ = 0;
   uint16_t enrollment_template_id_ = 0;
+  uint16_t reserved_slot_ = 0;
   String enrollment_error_;
   bool enrollment_result_pending_ = false;
-  uint8_t reserved_slots_[128] = {};
-  uint8_t storage_indexes_[4][32] = {};
-  uint8_t storage_page_ = 0;
-  uint16_t storage_count_ = 0;
-  uint16_t storage_capacity_limit_ = 0;
 
   bool verifyConnection();
   void setState(FingerprintState next);
@@ -106,8 +103,6 @@ class FingerprintService {
   bool isCommunicationError(uint8_t result) const;
   void updateEnrollment();
   void failEnrollment(const char* message);
-  bool chooseFreeSlot(uint16_t& slot);
-  bool readTemplateIndex(uint8_t page, uint8_t index[32]);
   const char* sensorError(uint8_t result) const;
 };
 

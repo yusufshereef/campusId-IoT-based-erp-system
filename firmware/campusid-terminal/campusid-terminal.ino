@@ -6,6 +6,8 @@
 #include "network_service.h"
 #include "status_feedback.h"
 
+#include <string.h>
+
 DisplayAdapter display;
 KeypadInput keypad;
 StatusFeedback feedback;
@@ -39,6 +41,9 @@ uint16_t enrollment_ack_template_id = 0;
 String enrollment_ack_error;
 uint32_t next_enrollment_ack = 0;
 constexpr uint32_t EnrollmentAckRetryMs = 5000;
+char maintenance_command[40];
+uint8_t maintenance_command_length = 0;
+bool maintenance_command_overflow = false;
 
 const char* menu_label(uint8_t index) {
   switch (index) {
@@ -55,6 +60,40 @@ void boot_line(const char* message, uint8_t y) {
   delay(120);
 }
 
+bool processMaintenanceSerial() {
+  bool reset_requested = false;
+  while (Serial.available() > 0) {
+    const char character = static_cast<char>(Serial.read());
+    if (character == '\r') continue;
+    if (character != '\n') {
+      if (maintenance_command_length < sizeof(maintenance_command) - 1 &&
+          !maintenance_command_overflow) {
+        maintenance_command[maintenance_command_length++] = character;
+      } else {
+        maintenance_command_overflow = true;
+      }
+      continue;
+    }
+    maintenance_command[maintenance_command_length] = '\0';
+    if (!maintenance_command_overflow &&
+        strcmp(maintenance_command, "RESET FINGERPRINT DATABASE") == 0) {
+      reset_requested = true;
+    }
+    maintenance_command_length = 0;
+    maintenance_command_overflow = false;
+  }
+  if (!reset_requested) return false;
+  if (fingerprint.enrollmentActive() ||
+      fingerprint.enrollmentState() != EnrollmentState::Idle ||
+      active_enrollment_command_id.length() != 0 || enrollment_ack_pending ||
+      network.hasPendingEnrollmentCommand()) {
+    Serial.println("Fingerprint reset refused; enrollment active");
+    return true;
+  }
+  fingerprint.resetFingerprintDatabase();
+  return true;
+}
+
 void draw_home() {
   display.clear();
   display.header("CAMPUSID", "BIOMETRIC TERMINAL");
@@ -66,15 +105,14 @@ void draw_home() {
   uint16_t color = CampusIdDisplay::Success;
   if (enrollment != EnrollmentState::Idle) {
     switch (enrollment) {
+      case EnrollmentState::PreparingEnrollment: title = "PREPARING"; break;
       case EnrollmentState::CaptureFirst:
       case EnrollmentState::ConvertFirstCapture:
-      case EnrollmentState::CheckExistingTemplate: title = "ENROLLMENT"; break;
-      case EnrollmentState::WaitingForRemoval: title = "FIRST CAPTURE OK"; break;
+      case EnrollmentState::CheckExistingTemplate: title = "PLACE FINGER"; break;
+      case EnrollmentState::WaitingForRemoval: title = "REMOVE FINGER"; break;
       case EnrollmentState::CaptureSecond:
-      case EnrollmentState::ConvertSecondCapture: title = "SECOND CAPTURE"; break;
+      case EnrollmentState::ConvertSecondCapture: title = "PLACE AGAIN"; break;
       case EnrollmentState::CreatingModel:
-      case EnrollmentState::CheckingStorage:
-      case EnrollmentState::ReadingStorageIndex:
       case EnrollmentState::StoringModel: title = "PROCESSING"; break;
       case EnrollmentState::AwaitingAck: title = "CONFIRMING"; break;
       case EnrollmentState::Success: title = "FINGERPRINT ENROLLED"; break;
@@ -219,9 +257,7 @@ void render(bool force = false) {
           ? EnrollmentState::CaptureFirst
           : current_enrollment == EnrollmentState::ConvertSecondCapture
               ? EnrollmentState::CaptureSecond
-              : current_enrollment == EnrollmentState::StoringModel ||
-                        current_enrollment == EnrollmentState::CheckingStorage ||
-                        current_enrollment == EnrollmentState::ReadingStorageIndex
+      : current_enrollment == EnrollmentState::StoringModel
                     ? EnrollmentState::CreatingModel
                     : current_enrollment;
   const bool match_changed =
@@ -316,13 +352,18 @@ void setup() {
 void loop() {
   bool redraw = false;
   const uint32_t fingerprint_started = millis();
+  const EnrollmentState enrollment_before_update = fingerprint.enrollmentState();
   fingerprint.update();
+  const bool enrollment_capture_just_prepared =
+      enrollment_before_update == EnrollmentState::PreparingEnrollment &&
+      fingerprint.enrollmentState() == EnrollmentState::CaptureFirst;
   const uint32_t fingerprint_duration = millis() - fingerprint_started;
   if (fingerprint_duration >= 1000) {
     Serial.print("Fingerprint update duration: ");
     Serial.print(fingerprint_duration);
     Serial.println(" ms");
   }
+  const bool maintenance_command_received = processMaintenanceSerial();
   if (network.state() != last_network_state) {
     last_network_state = network.state();
     redraw = true;
@@ -404,10 +445,9 @@ void loop() {
       fingerprint.enrollmentState() == EnrollmentState::Idle &&
       network.takeEnrollmentCommand(command)) {
     active_enrollment_command_id = command.id;
-    fingerprint.beginEnrollment(command.display_name,
-                                command.reserved_slots,
-                                command.reservations_valid);
+    fingerprint.beginEnrollment(command.display_name, command.reserved_slot);
     redraw = true;
+    if (screen == Screen::Home || screen == Screen::DeviceStatus) render();
   }
   // Service connectivity and at most one cloud request after biometric work.
   // ACK retries and heartbeat share this turn's single HTTP slot.
@@ -430,7 +470,8 @@ void loop() {
       next_enrollment_ack = millis() + EnrollmentAckRetryMs;
     }
   }
-  if (!completed_enrollment_request) {
+  if (!completed_enrollment_request && !maintenance_command_received &&
+      !enrollment_capture_just_prepared) {
     if (network.heartbeatDue()) {
       network.sendHeartbeat(fingerprint.state() == FingerprintState::Ready);
     } else if (!enrollment_ack_pending && active_enrollment_command_id.length() == 0 &&
@@ -438,7 +479,7 @@ void loop() {
                fingerprint.enrollmentState() == EnrollmentState::Idle &&
                fingerprint.state() == FingerprintState::Ready &&
                network.commandPollDue()) {
-      network.pollCommand();
+      network.pollCommand(fingerprint.capacity());
     }
   }
 #if ENABLE_KEYPAD

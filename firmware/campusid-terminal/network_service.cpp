@@ -3,7 +3,6 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
-#include <string.h>
 
 #include "hardware_config.h"
 
@@ -114,8 +113,8 @@ bool NetworkService::commandPollDue() const {
          static_cast<int32_t>(millis() - next_command_poll_) >= 0;
 }
 
-void NetworkService::pollCommand() {
-  pollCommands();
+void NetworkService::pollCommand(uint16_t sensor_capacity) {
+  pollCommands(sensor_capacity);
   next_command_poll_ = millis() + CommandPollIntervalMs;
 }
 
@@ -259,39 +258,31 @@ String jsonString(const String& source, const char* key) {
   return value;
 }
 
-bool jsonReservedSlots(const String& source, uint8_t slots[128]) {
-  memset(slots, 0, 128);
-  const int marker = source.indexOf("\"reserved_slots\"");
-  if (marker < 0) return false;
-  int position = source.indexOf('[', marker);
-  if (position < 0) return false;
-  ++position;
-  while (position < source.length()) {
-    while (position < source.length() &&
-           (source[position] == ' ' || source[position] == ',')) ++position;
-    if (position >= source.length()) return false;
-    if (source[position] == ']') return true;
-    if (source[position] < '0' || source[position] > '9') return false;
-    uint32_t slot = 0;
-    do {
-      slot = slot * 10 + (source[position] - '0');
-      if (slot > 1023) return false;
-      ++position;
-    } while (position < source.length() && source[position] >= '0' &&
-             source[position] <= '9');
-    slots[slot / 8] |= 1u << (slot % 8);
-    while (position < source.length() && source[position] == ' ') ++position;
-    if (position >= source.length() ||
-        (source[position] != ',' && source[position] != ']')) return false;
-  }
-  return false;
+uint16_t jsonNumber(const String& source, const char* key) {
+  const String marker = String("\"") + key + "\":";
+  const int start = source.indexOf(marker);
+  if (start < 0) return 0;
+  int position = start + marker.length();
+  while (position < source.length() && source[position] == ' ') ++position;
+  if (position >= source.length() || source[position] < '0' ||
+      source[position] > '9') return 0;
+  uint32_t value = 0;
+  do {
+    value = value * 10 + (source[position] - '0');
+    if (value > 1023) return 0;
+    ++position;
+  } while (position < source.length() && source[position] >= '0' &&
+           source[position] <= '9');
+  return static_cast<uint16_t>(value);
 }
 }
 
-void NetworkService::pollCommands() {
+void NetworkService::pollCommands(uint16_t sensor_capacity) {
   String payload = "{\"device_id\":\"";
   payload += CAMPUSID_DEVICE_ID;
-  payload += "\",\"action\":\"poll\"}";
+  payload += "\",\"action\":\"poll\",\"sensor_capacity\":";
+  payload += String(sensor_capacity);
+  payload += "}";
   String response;
   if (!sendCommandRequest(payload, response) ||
       response.indexOf("\"command\":null") >= 0) {
@@ -301,9 +292,9 @@ void NetworkService::pollCommands() {
   command.id = jsonString(response, "id");
   command.person_id = jsonString(response, "person_id");
   command.display_name = jsonString(response, "display_name");
-  command.reservations_valid =
-      jsonReservedSlots(response, command.reserved_slots);
-  if (command.id.length() > 0 && command.person_id.length() > 0) {
+  command.reserved_slot = jsonNumber(response, "reserved_slot");
+  if (command.id.length() > 0 && command.person_id.length() > 0 &&
+      command.reserved_slot > 0) {
     pending_command_ = command;
     has_pending_command_ = true;
   }

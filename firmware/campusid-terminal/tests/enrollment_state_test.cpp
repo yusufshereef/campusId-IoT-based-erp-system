@@ -1,4 +1,5 @@
 #include "../fingerprint_service.h"
+
 #include <cassert>
 
 static void tick(FingerprintService& service, uint32_t elapsed = 250) {
@@ -6,16 +7,25 @@ static void tick(FingerprintService& service, uint32_t elapsed = 250) {
   service.update();
 }
 
-static void start(FingerprintService& service, const uint8_t reserved[128]) {
+static void start(FingerprintService& service, uint16_t reserved_slot = 2) {
   sensor_fixture = SensorFixture{};
-  sensor_fixture.occupied[0] = 2;  // Preserve orphan slot 1.
+  sensor_fixture.occupied[0] = 2;  // Existing template #1 remains untouched.
   sensor_fixture.images = {FINGERPRINT_OK, FINGERPRINT_NOFINGER, FINGERPRINT_OK};
   test_millis = 0;
   service.begin();
-  service.beginEnrollment("Test student", reserved, true);
+  assert(service.state() == FingerprintState::Ready);
+  assert(service.capacity() == 64);
+  assert(service.enrollmentState() == EnrollmentState::Idle);
+  assert(service.beginEnrollment("Test student", reserved_slot));
 }
 
-static void capture(FingerprintService& service) {
+static void prepare(FingerprintService& service) {
+  tick(service);
+  assert(service.enrollmentState() == EnrollmentState::CaptureFirst);
+}
+
+static void captureToStore(FingerprintService& service) {
+  prepare(service);
   tick(service);
   assert(service.enrollmentState() == EnrollmentState::ConvertFirstCapture);
   tick(service);
@@ -29,78 +39,102 @@ static void capture(FingerprintService& service) {
   tick(service);
   assert(service.enrollmentState() == EnrollmentState::CreatingModel);
   tick(service);
-  assert(service.enrollmentState() == EnrollmentState::CheckingStorage);
-  tick(service);
-  assert(service.enrollmentState() == EnrollmentState::ReadingStorageIndex);
-  tick(service);
   assert(service.enrollmentState() == EnrollmentState::StoringModel);
-  tick(service);
-  assert(service.enrollmentState() == EnrollmentState::AwaitingAck);
 }
 
 int main() {
-  uint8_t reserved[128] = {};
   bool success;
   uint16_t slot;
   String error;
   {
     FingerprintService service;
-    start(service, reserved);
-    capture(service);
+    sensor_fixture = SensorFixture{};
+    sensor_fixture.capacity = 72;
+    sensor_fixture.occupied[0] = 2;
+    service.begin();
+    assert(service.capacity() == 72 && service.templateCount() == 1);
+    assert(sensor_fixture.empty_calls == 0);  // Normal boot never wipes data.
+    assert(service.resetFingerprintDatabase());
+    assert(sensor_fixture.empty_calls == 1);
+    assert(service.templateCount() == 0);
+  }
+  {
+    FingerprintService service;
+    sensor_fixture = SensorFixture{};
+    sensor_fixture.capacity = 0;
+    service.begin();
+    assert(service.state() == FingerprintState::SensorUnavailable);
+  }
+  {
+    FingerprintService service;
+    start(service);
+    captureToStore(service);
+    tick(service);
+    assert(service.enrollmentState() == EnrollmentState::AwaitingAck);
     assert(service.takeEnrollmentResult(success, slot, error) && success && slot == 2);
-    // Repeated unsuccessful ACK attempts never re-enter capture/store.
     for (unsigned i = 0; i < 20; ++i) tick(service, 1000);
-    assert(sensor_fixture.stores == 1);
+    assert(sensor_fixture.stores == 1);  // ACK retries cannot store twice.
     assert(!service.takeEnrollmentResult(success, slot, error));
     tick(service, 11000);
     assert(service.enrollmentState() == EnrollmentState::Failed);
     tick(service, 4000);
     tick(service);
-    assert(service.state() == FingerprintState::Ready);
-    service.enrollmentAcknowledged(true); // Same stored result confirmed late.
+    service.enrollmentAcknowledged(true);
     assert(service.enrollmentState() == EnrollmentState::Success);
     assert(service.enrollmentTemplateId() == 2 && sensor_fixture.stores == 1);
   }
   {
     FingerprintService service;
-    start(service, reserved);
-    sensor_fixture.images.clear();
+    start(service);
+    prepare(service);
     tick(service, 60000);
     assert(service.takeEnrollmentResult(success, slot, error) && !success);
     assert(sensor_fixture.stores == 0);
-    service.enrollmentAcknowledged(true);
-    assert(service.enrollmentState() == EnrollmentState::Failed);
   }
   {
     FingerprintService service;
-    start(service, reserved);
-    sensor_fixture.search = FINGERPRINT_OK; // Already stored, including orphan #2.
+    start(service);
+    sensor_fixture.search = FINGERPRINT_OK;
+    prepare(service);
     tick(service);
     tick(service);
     tick(service);
     assert(service.takeEnrollmentResult(success, slot, error) && !success);
     assert(sensor_fixture.stores == 0);
   }
-  for (bool bad_checksum : {false, true}) {
+  {
     FingerprintService service;
-    start(service, reserved);
-    sensor_fixture.index_available = true;
-    sensor_fixture.corrupt_checksum = bad_checksum;
-    for (unsigned i = 0; i < 10; ++i) tick(service);
-    if (bad_checksum) {
-      assert(service.takeEnrollmentResult(success, slot, error) && !success);
-      assert(sensor_fixture.stores == 0);
-    } else {
-      assert(service.takeEnrollmentResult(success, slot, error) && success && slot == 2);
-      assert(sensor_fixture.stores == 1);
-    }
+    start(service);
+    captureToStore(service);
+    sensor_fixture.store = FINGERPRINT_FLASHERR;
+    tick(service);
+    assert(service.takeEnrollmentResult(success, slot, error) && !success);
+    assert(sensor_fixture.stores == 1);
+    assert(sensor_fixture.occupied[0] == 2);  // No new stored template.
   }
   {
     FingerprintService service;
-    reserved[0] = 4; // Missing physical slot 2 remains reserved by backend.
-    start(service, reserved);
-    capture(service);
-    assert(service.takeEnrollmentResult(success, slot, error) && success && slot == 3);
-    assert(sensor_fixture.stores == 1);
+    start(service);
+    sensor_fixture.create = FINGERPRINT_ENROLLMISMATCH;
+    prepare(service);
+    tick(service);
+    tick(service);
+    tick(service);
+    tick(service);
+    tick(service);
+    tick(service);
+    tick(service);
+    assert(service.takeEnrollmentResult(success, slot, error) && !success);
+    assert(sensor_fixture.stores == 0);
+  }
+  {
+    FingerprintService service;
+    sensor_fixture = SensorFixture{};
+    test_millis = 0;
+    service.begin();
+    assert(!service.beginEnrollment("Test student", 65));
+    assert(service.enrollmentState() == EnrollmentState::AwaitingAck);
+    assert(service.takeEnrollmentResult(success, slot, error) && !success);
+    assert(sensor_fixture.stores == 0);
   }
 }
