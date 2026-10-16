@@ -50,7 +50,7 @@ namespace CampusIdDisplay {
 constexpr int Width = 240;
 constexpr int Height = 320;
 // The screens below use a 240x320 portrait coordinate system.
-constexpr int Rotation = 0;
+constexpr int Rotation = 2;
 constexpr uint16_t Background = 0x1082;
 constexpr uint16_t Panel = 0x2128;
 constexpr uint16_t Accent = 0x05BF;
