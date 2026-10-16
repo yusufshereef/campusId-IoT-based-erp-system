@@ -155,7 +155,10 @@ bool NetworkService::sendHeartbeatRequest(bool sensor_ready,
   WiFiClientSecure client;
   client.setCACert(CAMPUSID_SUPABASE_ROOT_CA);
   HTTPClient request;
-  if (!request.begin(client, CAMPUSID_HEARTBEAT_URL)) {
+  const bool request_ready = request.begin(client, CAMPUSID_HEARTBEAT_URL);
+  Serial.print("Heartbeat HTTP begin: ");
+  Serial.println(request_ready ? "ok" : "failed");
+  if (!request_ready) {
     Serial.println("Heartbeat request initialization failed");
     return false;
   }
@@ -175,6 +178,18 @@ bool NetworkService::sendHeartbeatRequest(bool sensor_ready,
   payload += "}";
   const uint32_t heartbeat_started = millis();
   const int status = request.POST(payload);
+  if (status < 0) {
+    Serial.print("Heartbeat transport error: ");
+    Serial.println(request.errorToString(status));
+    char tls_error[128] = {};
+    const int tls_code = client.lastError(tls_error, sizeof(tls_error));
+    if (tls_code != 0) {
+      Serial.print("Heartbeat TLS error ");
+      Serial.print(tls_code);
+      Serial.print(": ");
+      Serial.println(tls_error);
+    }
+  }
   const String response_body = request.getString();
   const uint32_t heartbeat_duration = millis() - heartbeat_started;
   request.end();
