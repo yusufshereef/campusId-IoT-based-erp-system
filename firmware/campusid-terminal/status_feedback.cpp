@@ -3,7 +3,9 @@
 void StatusFeedback::begin() {
   pinMode(CampusIdPins::GreenLed, OUTPUT);
   pinMode(CampusIdPins::RedLed, OUTPUT);
+#if ENABLE_BUZZER
   pinMode(CampusIdPins::Buzzer, OUTPUT);
+#endif
   output(false, false);
 }
 
@@ -12,7 +14,11 @@ void StatusFeedback::output(bool led, bool buzzer) {
                led && kind_ == FeedbackKind::Success ? HIGH : LOW);
   digitalWrite(CampusIdPins::RedLed,
                led && kind_ != FeedbackKind::Success ? HIGH : LOW);
+#if ENABLE_BUZZER
   digitalWrite(CampusIdPins::Buzzer, buzzer ? HIGH : LOW);
+#else
+  (void)buzzer;
+#endif
 }
 
 void StatusFeedback::play(FeedbackKind kind) {

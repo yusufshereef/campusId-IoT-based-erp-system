@@ -34,11 +34,12 @@ phases.
   `CAMPUSID_DISPLAY_ILI9341 1` and `CAMPUSID_DISPLAY_ST7789 0`.
 - ST7789 support remains available only for a different, separately verified
   display. It is not selected for the ordered KTRON module.
-- The product page content available to this project does not provide a
-  verified module pinout or signal-level tolerance table. Check the received
-  board's silkscreen and documentation before wiring.
-- Confirm the display logic voltage and backlight requirements. Do not power a
-  backlight from an ESP32 GPIO.
+- Verified TFT wiring: CS 5, DC 2, RESET 4, MOSI 23, SCK 18, MISO 19.
+- Verified R307S UART2 wiring: sensor TX -> GPIO16 (RX2), sensor RX -> GPIO17
+  (TX2), at 57600 baud.
+- The buzzer is disabled for this hardware baseline because GPIO2 is the TFT
+  data/command pin. It remains structurally available for a future pin
+  assignment.
 
 The selected firmware requires Adafruit GFX Library and Adafruit ILI9341.
 Adafruit ST7789 and ST7735 Library is needed only if the alternate ST7789
@@ -63,13 +64,17 @@ configuration is deliberately selected for another module.
 | --- | ---: | --- |
 | TFT SCK | 18 | VSPI clock |
 | TFT MOSI | 23 | VSPI MOSI |
-| TFT CS | 27 | Display chip select |
-| TFT DC | 4 | Display data/command |
-| TFT RESET | Configurable, default unassigned | `TftReset = -1`; assign only after verifying module documentation |
+| TFT MISO | 19 | VSPI MISO |
+| TFT CS | 5 | Display chip select |
+| TFT DC | 2 | Display data/command |
+| TFT RESET | 4 | Display reset |
 | Keypad rows | 13, 14, 25, 26 | Outputs |
 | Keypad columns | 32, 33, 34, 35 | Inputs |
 | Green LED | 21 | Use a series resistor and transistor if required |
 | Red LED | 22 | Use a series resistor and transistor if required |
+| R307S RX | 16 | Sensor TX -> ESP32 RX2 |
+| R307S TX | 17 | Sensor RX -> ESP32 TX2 |
+| Buzzer | 2 | Disabled; conflicts with TFT DC |
 | Active buzzer | 2 | Use a transistor/driver if current exceeds GPIO limits |
 | R307S sensor TX -> ESP32 RX | 16 | UART2 RX, 57600 8N1 |
 | ESP32 TX -> R307S sensor RX | 17 | UART2 TX, 57600 8N1 |
@@ -174,8 +179,7 @@ enrollment, deletion, overwrite, or clear operations. A successful recognition
 is reported locally as:
 
 ```text
-Fingerprint matched: template_id=1 confidence=...
-Recognition only: no student mapping or attendance was created.
+FINGERPRINT MATCHED - local recognition only.
 ```
 
 The result is not interpreted as a student identity. A finger must be removed
@@ -189,26 +193,25 @@ guards drawing through `DisplayAdapter::available()`. Fingerprint recognition
 remains independent of the display; if the TFT is disconnected or unusable,
 the UART2 sensor loop continues and Serial remains the observation interface.
 
-The display reset pin is intentionally unassigned by default because the
-ordered module's reset wiring has not been verified. The adapter uses
-`CampusIdPins::TftReset`; leave it at `-1` unless the received module
-documentation confirms a safe ESP32 GPIO and reset sequence.
+The display adapter uses the verified reset pin and all four SPI signals,
+including MISO.
 
 ## Compile and upload
 
 1. Install the ESP32 board package and select an ESP32 Dev Module.
-2. Install Adafruit GFX Library and Adafruit ILI9341 for the display.
-3. Install Adafruit Fingerprint Sensor Library.
-4. Open `campusid-terminal.ino` with all firmware files in this directory.
-5. Connect the R307S with verified power and crossed UART data lines.
-6. Compile for **ESP32 Dev Module**. Do not upload until wiring has been
+2. Install Adafruit GFX Library, Adafruit ILI9341, and Adafruit Fingerprint
+   Sensor Library.
+3. Open `campusid-terminal.ino` with all firmware files in this directory.
+4. Connect the R307S with verified power and crossed UART data lines.
+5. Compile for **ESP32 Dev Module**. Do not upload until wiring has been
    checked.
-7. Upload only when you are ready to perform the physical test.
-8. Open Serial Monitor at 115200 baud.
+6. Upload only when you are ready to perform the physical test.
+7. Open Serial Monitor at 115200 baud.
 
-The TFT, keypad, LEDs, and buzzer may remain disconnected for this sensor-only
-check. The firmware keeps its display calls guarded by the display adapter, but
-Serial is the authoritative Phase 2 observation interface.
+The local workflow is: boot, initialize TFT, initialize R307S, report READY,
+wait for a finger, show match/no-match, require finger removal, and return to
+READY. A match is local recognition only; it is not attendance or a backend
+event.
 
 Expected startup output includes:
 
@@ -216,9 +219,10 @@ Expected startup output includes:
 CampusID terminal boot
 R307S UART2 RX GPIO16 TX GPIO17 at 57600 baud
 Fingerprint sensor: ready
-Fingerprint state: scanning
+Fingerprint state: ready
+READY - waiting for finger
 Fingerprint matched: template_id=1 confidence=...
-Recognition only: no student mapping or attendance was created.
+FINGERPRINT MATCHED - local recognition only.
 ```
 
 If the sensor is unavailable, the firmware reports `sensor unavailable` and

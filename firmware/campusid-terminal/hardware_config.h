@@ -11,6 +11,7 @@
 #define CAMPUSID_DISPLAY_ILI9341 1
 // Optional alternate adapter for a different, verified module only.
 #define CAMPUSID_DISPLAY_ST7789 0
+#define ENABLE_BUZZER 0
 
 #if CAMPUSID_DISPLAY_ILI9341 == CAMPUSID_DISPLAY_ST7789
 #error "Select exactly one display controller"
@@ -19,11 +20,10 @@
 namespace CampusIdPins {
 constexpr int TftSck = 18;
 constexpr int TftMosi = 23;
-constexpr int TftCs = 27;
-constexpr int TftDc = 4;
-// The ordered module's reset wiring is not verified. -1 leaves reset
-// unassigned; set this to a verified GPIO only with the module documentation.
-constexpr int TftReset = -1;
+constexpr int TftMiso = 19;
+constexpr int TftCs = 5;
+constexpr int TftDc = 2;
+constexpr int TftReset = 4;
 
 // GPIO34 and GPIO35 are input-only and have no internal pull resistors.
 // Use external 10K pull-ups for those keypad columns.
@@ -38,7 +38,7 @@ constexpr int KeypadCol3 = 35;
 
 constexpr int GreenLed = 21;
 constexpr int RedLed = 22;
-constexpr int Buzzer = 2;
+constexpr int Buzzer = 2;  // Reserved until a future, non-TFT GPIO is selected.
 
 // R307S UART2 connection: sensor TX -> ESP32 RX, sensor RX -> ESP32 TX.
 constexpr int R307Rx = 16;

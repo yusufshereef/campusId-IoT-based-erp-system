@@ -10,11 +10,12 @@ static Adafruit_ST7789 display(
 #elif CAMPUSID_DISPLAY_ILI9341
 #include <Adafruit_ILI9341.h>
 static Adafruit_ILI9341 display(
-    CampusIdPins::TftCs, CampusIdPins::TftDc, CampusIdPins::TftReset);
+    CampusIdPins::TftCs, CampusIdPins::TftDc, CampusIdPins::TftMosi,
+    CampusIdPins::TftSck, CampusIdPins::TftReset, CampusIdPins::TftMiso);
 #endif
 
 bool DisplayAdapter::begin() {
-  SPI.begin(CampusIdPins::TftSck, -1, CampusIdPins::TftMosi,
+  SPI.begin(CampusIdPins::TftSck, CampusIdPins::TftMiso, CampusIdPins::TftMosi,
             CampusIdPins::TftCs);
 #if CAMPUSID_DISPLAY_ST7789
   display.init(CampusIdDisplay::Width, CampusIdDisplay::Height);

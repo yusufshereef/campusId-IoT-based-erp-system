@@ -42,7 +42,7 @@ void draw_home() {
   display.panel(10, 58, 220, 75);
   display.text(CAMPUSID_DEVICE_ID, 20, 70, 1, CampusIdDisplay::Accent);
   const FingerprintState state = fingerprint.state();
-  const char* title = "PLACE YOUR FINGER";
+  const char* title = "TERMINAL READY";
   uint16_t color = CampusIdDisplay::Success;
   if (state == FingerprintState::Initializing) {
     title = "INITIALIZING SENSOR";
@@ -51,17 +51,17 @@ void draw_home() {
     title = "READING FINGERPRINT";
     color = CampusIdDisplay::Accent;
   } else if (state == FingerprintState::Matched && has_last_match) {
-    title = "FINGERPRINT RECOGNIZED";
+    title = "FINGERPRINT MATCHED";
     color = CampusIdDisplay::Success;
   } else if (state == FingerprintState::NoMatch) {
-    title = "FINGERPRINT NOT RECOGNIZED";
+    title = "NOT RECOGNIZED";
     color = CampusIdDisplay::Error;
   } else if (state == FingerprintState::WaitingForRemoval) {
     title = "REMOVE YOUR FINGER";
     color = CampusIdDisplay::Warning;
   } else if (state == FingerprintState::SensorUnavailable ||
              state == FingerprintState::CommunicationError) {
-    title = "SENSOR UNAVAILABLE";
+    title = "SENSOR ERROR";
     color = CampusIdDisplay::Error;
   }
   display.panel(10, 148, 220, 82, color);
@@ -80,6 +80,8 @@ void draw_home() {
   } else if (state == FingerprintState::SensorUnavailable ||
              state == FingerprintState::CommunicationError) {
     display.text("Retrying safely", 20, 208, 1, CampusIdDisplay::Background);
+  } else if (state == FingerprintState::Ready) {
+    display.text("PLACE FINGER", 20, 208, 1, CampusIdDisplay::Background);
   }
   display.text("Local recognition only", 20, 250, 1, CampusIdDisplay::Muted);
   display.text("SELECT: terminal menu", 20, 270, 1, CampusIdDisplay::Muted);
@@ -185,12 +187,6 @@ void setup() {
   Serial.print(" TX GPIO");
   Serial.print(CampusIdPins::R307Tx);
   Serial.println(" at 57600 baud");
-  fingerprint.begin();
-  Serial.print("Fingerprint sensor: ");
-  Serial.println(fingerprintStateName(fingerprint.state()));
-  keypad.begin();
-  feedback.begin();
-
   pinMode(CampusIdPins::TftDc, OUTPUT);
   digitalWrite(CampusIdPins::TftDc, LOW);
   const bool display_ready = display.begin();
@@ -206,6 +202,11 @@ void setup() {
   } else {
     Serial.println("TFT: unavailable; continuing without display");
   }
+  fingerprint.begin();
+  Serial.print("Fingerprint sensor: ");
+  Serial.println(fingerprintStateName(fingerprint.state()));
+  keypad.begin();
+  feedback.begin();
   render();
 }
 
@@ -226,6 +227,9 @@ void loop() {
             static_cast<int32_t>(FingerprintDiagnosticIntervalMs)) {
       Serial.print("Fingerprint state: ");
       Serial.println(fingerprintStateName(fingerprint_state));
+      if (fingerprint_state == FingerprintState::Ready) {
+        Serial.println("READY - waiting for finger");
+      }
       if (diagnostic) {
         last_fingerprint_diagnostic = now;
         has_fingerprint_diagnostic = true;
@@ -241,7 +245,7 @@ void loop() {
     Serial.print(match.template_id);
     Serial.print(" confidence=");
     Serial.println(match.confidence);
-    Serial.println("Recognition only: no student mapping or attendance was created.");
+    Serial.println("FINGERPRINT MATCHED - local recognition only.");
     feedback.play(FeedbackKind::Success);
     redraw = true;
   }
