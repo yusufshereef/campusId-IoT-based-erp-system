@@ -23,13 +23,16 @@ import {
 } from "./lib/admin";
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
 import { Overview } from "./components/Overview";
-import type { CampusClass, Person, Tab, Notice } from "./lib/types";
+import { deviceStatus } from "./lib/device_status";
+import type { CampusClass, Device, Person, Tab, Notice } from "./lib/types";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview"),
     [classes, setClasses] = useState<CampusClass[]>([]),
     [people, setPeople] = useState<Person[]>([]),
     [assignments, setAssignments] = useState<Record<string, string[]>>({}),
+    [device, setDevice] = useState<Device | null>(null),
+    [deviceError, setDeviceError] = useState<string | null>(null),
     [notice, setNotice] = useState<Notice | null>(null),
     [search, setSearch] = useState(""),
     [busy, setBusy] = useState(false),
@@ -62,6 +65,7 @@ export default function App() {
       () => people.filter((p) => p.role === "teacher"),
       [people],
     );
+  const terminalOnline = deviceStatus(device);
   function isCurrentSession(
     generation: number,
     currentSession: Session | null,
@@ -87,13 +91,19 @@ export default function App() {
     const request = ++refreshGeneration.current;
     setBusy(true);
     try {
-      const [c, p, a] = await Promise.all([
+      const [c, p, a, d] = await Promise.all([
         supabase.from("classes").select("*").order("name"),
         supabase
           .from("people")
           .select("*")
           .order("created_at", { ascending: false }),
         supabase.from("teacher_classes").select("teacher_id,class_id"),
+        supabase
+          .from("devices")
+          .select(
+            "id,device_code,display_name,last_seen_at,firmware_version,sensor_ready,pending_event_count",
+          )
+          .order("display_name"),
       ]);
       const err = c.error || p.error || a.error;
       if (
@@ -122,6 +132,8 @@ export default function App() {
         m[row.teacher_id].push(row.class_id);
       }
       setAssignments(m);
+      setDeviceError(d.error ? databaseError(d.error) : null);
+      setDevice((d.data?.[0] as Device | undefined) || null);
     } catch (error) {
       if (
         !isCurrentSession(generation, currentSession) ||
@@ -159,6 +171,8 @@ export default function App() {
       setClasses([]);
       setPeople([]);
       setAssignments({});
+      setDevice(null);
+      setDeviceError(null);
       setDbConnected(false);
       setNotice(null);
       setPassword("");
@@ -221,6 +235,13 @@ export default function App() {
     return () => {
       active = false;
     };
+  }, [session?.user.id]);
+  useEffect(() => {
+    if (!session || !supabase) return;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 15000);
+    return () => window.clearInterval(timer);
   }, [session?.user.id]);
   async function signIn(e: FormEvent) {
     e.preventDefault();
@@ -582,12 +603,12 @@ export default function App() {
           ))}
         </nav>
         <div className="device">
-          <span className="dot offline" />
+          <span className={`dot ${terminalOnline ? "" : "offline"}`} />
           <div>
-            <b>Terminal integration</b>
-            <small>Hardware not connected</small>
+            <b>CampusID Terminal 01</b>
+            <small>{terminalOnline ? "Online" : "Offline"}</small>
           </div>
-          <em>PLANNED</em>
+          <em>{terminalOnline ? "LIVE" : "WAITING"}</em>
         </div>
         <div className="admin">
           <span>{userRole === "administrator" ? "AD" : "TC"}</span>
@@ -661,6 +682,8 @@ export default function App() {
               connected={dbConnected}
               loading={busy}
               isAdmin={userRole === "administrator"}
+              device={device}
+              deviceError={deviceError}
               onNavigate={navigate}
             />
           )}

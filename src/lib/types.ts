@@ -17,6 +17,16 @@ export type Person = {
   classes?: CampusClass | null;
 };
 
+export type Device = {
+  id: string;
+  device_code: string;
+  display_name: string;
+  last_seen_at: string | null;
+  firmware_version: string | null;
+  sensor_ready: boolean;
+  pending_event_count: number;
+};
+
 export type Tab =
   "overview" | "attendance" | "classes" | "students" | "teachers";
 export type Notice = { message: string; kind: "success" | "error" };

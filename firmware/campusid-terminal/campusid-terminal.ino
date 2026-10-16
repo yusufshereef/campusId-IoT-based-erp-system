@@ -3,6 +3,7 @@
 #include "hardware_config.h"
 #include "hardware_self_test.h"
 #include "keypad_input.h"
+#include "network_service.h"
 #include "status_feedback.h"
 
 DisplayAdapter display;
@@ -10,6 +11,7 @@ KeypadInput keypad;
 StatusFeedback feedback;
 HardwareSelfTest self_test;
 FingerprintService fingerprint;
+NetworkService network;
 
 enum class Screen { Home, Menu, HardwareTest, DeviceStatus, About };
 Screen screen = Screen::Home;
@@ -23,6 +25,7 @@ bool has_last_match = false;
 bool has_rendered = false;
 Screen rendered_screen = Screen::Home;
 FingerprintState rendered_fingerprint_state = FingerprintState::Initializing;
+NetworkState last_network_state = NetworkState::Disabled;
 bool rendered_has_match = false;
 uint16_t rendered_template_id = 0;
 uint16_t rendered_confidence = 0;
@@ -88,6 +91,9 @@ void draw_home() {
   }
   display.text("Local recognition only", 20, 250, 1, CampusIdDisplay::Muted);
   display.text("SELECT: terminal menu", 20, 270, 1, CampusIdDisplay::Muted);
+  display.text(network.online() ? "ONLINE" : "OFFLINE", 20, 290, 1,
+               network.online() ? CampusIdDisplay::Success
+                                : CampusIdDisplay::Muted);
 }
 
 void draw_menu() {
@@ -228,12 +234,18 @@ void setup() {
   keypad.begin();
 #endif
   feedback.begin();
+  network.begin();
   render(true);
 }
 
 void loop() {
   bool redraw = false;
   fingerprint.update();
+  network.update(fingerprint.state() == FingerprintState::Ready);
+  if (network.state() != last_network_state) {
+    last_network_state = network.state();
+    redraw = true;
+  }
   const FingerprintState fingerprint_state = fingerprint.state();
   if (fingerprint_state != last_fingerprint_state) {
     last_fingerprint_state = fingerprint_state;

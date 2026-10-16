@@ -1,6 +1,7 @@
 node_modules
 dist
 .env.local
+firmware/campusid-terminal/secrets.h
 
 # Local Supabase CLI state
 supabase/.temp/

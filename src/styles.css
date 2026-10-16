@@ -618,6 +618,47 @@ header b {
   font-size: 12px;
   line-height: 1.7;
 }
+.device-status-card {
+  margin-bottom: 24px;
+}
+.device-status-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 20px;
+  color: var(--success);
+  font-size: 12px;
+  letter-spacing: 0.6px;
+}
+.status-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #31a86f;
+  box-shadow: 0 0 0 4px #e5f5eb;
+}
+.status-dot.offline {
+  background: #c59a35;
+  box-shadow: 0 0 0 4px #fff5dd;
+}
+.device-health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.device-health-grid div {
+  display: grid;
+  gap: 6px;
+}
+.device-health-grid small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.device-health-grid b {
+  color: #304d3b;
+  font-size: 13px;
+}
 .form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1188,6 +1229,9 @@ code {
   }
   .system-row {
     font-size: 11px;
+  }
+  .device-health-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .system-row > span:first-child {
     gap: 7px;

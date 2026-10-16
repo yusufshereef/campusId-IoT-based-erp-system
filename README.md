@@ -2,7 +2,7 @@
 
 An expo-focused IoT attendance prototype: a React + TypeScript workspace, Supabase authentication and PostgreSQL authorization, and an ESP32/R307S fingerprint terminal.
 
-**Working in source:** administrator and teacher sign-in, class/student/teacher registration, assignments, activation, search, and manual attendance with corrections. Firmware performs **local recognition only**. Remote enrollment, device-to-cloud attendance, and durable offline synchronization are not connected yet.
+**Working in source:** administrator and teacher sign-in, class/student/teacher registration, assignments, activation, search, manual attendance with corrections, and the Milestone 2 terminal health slice. Firmware still performs **local recognition only**; no attendance events, remote enrollment, or offline synchronization are connected.
 
 - [Implementation and design](docs/IMPLEMENTATION.md)
 - [Hardware feasibility and expo roadmap](docs/EXPO_ROADMAP.md)
@@ -51,10 +51,11 @@ In the **development project's** Supabase SQL Editor, paste and run each file se
 3. [`20261015223000_secure_auth_and_rls.sql`](supabase/migrations/20261015223000_secure_auth_and_rls.sql)
 4. [`20261015233000_least_privilege_table_grants.sql`](supabase/migrations/20261015233000_least_privilege_table_grants.sql)
 5. [`20261016001000_attendance_records.sql`](supabase/migrations/20261016001000_attendance_records.sql)
+6. [`20261016180000_devices_and_heartbeat.sql`](supabase/migrations/20261016180000_devices_and_heartbeat.sql)
 
 The standalone baseline creates the original tables; the timestamped migrations extend/harden them. Running migrations alone on an empty database is insufficient. For an existing project, inspect its applied schema before changing it. This review does not apply hosted migrations.
 
-Verify these tables exist: `classes`, `people`, `teacher_classes`, `fingerprint_mappings`, `user_roles`, `attendance_records`, and `attendance_record_audit`. RLS must remain enabled; anonymous clients have no table access. The teacher-registration RPC is administrator-only. Fingerprint mappings are inaccessible to the browser.
+Verify these tables exist: `classes`, `people`, `teacher_classes`, `fingerprint_mappings`, `user_roles`, `attendance_records`, `attendance_record_audit`, and `devices`. RLS must remain enabled; anonymous clients have no table access. The teacher-registration RPC is administrator-only. Fingerprint mappings and device secret hashes are inaccessible to the browser.
 
 ### Provision the first administrator
 
@@ -81,6 +82,42 @@ values ('TEACHER_AUTH_UUID', 'teacher', 'TEACHER_PERSON_UUID');
 ```
 
 Registering a teacher in the ERP creates a person and assignments; it does not create an Auth login. Never put administrator credentials in firmware.
+
+### Provision the physical terminal
+
+Generate a long random secret locally and retain it only in the terminal's
+ignored `firmware/campusid-terminal/secrets.h` file. Store only its SHA-256
+hash in the `devices` table:
+
+```bash
+openssl rand -hex 32
+printf '%s' 'PASTE_DEVICE_SECRET_HERE' | shasum -a 256
+```
+
+As the project owner in SQL Editor, replace the generated values and run:
+
+```sql
+insert into public.devices (
+  device_code, display_name, secret_hash
+)
+values (
+  'campusid-terminal-01',
+  'CampusID Terminal 01',
+  'SHA256_HASH_OF_DEVICE_SECRET'
+);
+```
+
+The device heartbeat function must be deployed with JWT verification disabled
+at the gateway because it authenticates with the device-specific header:
+
+```bash
+supabase functions deploy device-heartbeat --no-verify-jwt --project-ref YOUR_PROJECT_REF
+```
+
+Set the function's standard `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` secrets through the hosted Supabase function
+environment. Never place the service-role key in firmware or browser
+environment variables.
 
 ## 4. Start development
 
@@ -134,7 +171,7 @@ The scripts create temporary Auth/database fixtures inside transactions and end 
 2. Select **ESP32 Dev Module** and the board's USB port.
 3. Install **Adafruit GFX Library**, **Adafruit ILI9341**, and **Adafruit Fingerprint Sensor Library**, including their Library Manager dependencies.
 4. Open [`campusid-terminal.ino`](firmware/campusid-terminal/campusid-terminal.ino); keep all companion files in the same sketch directory.
-5. Verify/compile first. Open Serial Monitor at **115200 baud** after a verified upload; sensor UART runs at **57600 baud**.
+5. For Milestone 2, copy [`secrets.example.h`](firmware/campusid-terminal/secrets.example.h) to the ignored `secrets.h` and fill in the Wi-Fi credentials, HTTPS heartbeat URL, device secret, and the endpoint CA certificate locally. Verify/compile first. Open Serial Monitor at **115200 baud** after a verified upload; sensor UART runs at **57600 baud**.
 
 **Resolve the display wiring discrepancy before uploading the combined firmware.** The reported working TFT uses CS 5 / DC 2 / RESET 4 / MOSI 23 / CLK 18 / MISO 19 with the explicit six-argument constructor. The combined terminal still uses CS 27 / DC 4 / RESET -1 and a hardware-SPI constructor. GPIO2 is currently assigned to its buzzer. Do not merge those configurations without resolving that conflict.
 

@@ -212,6 +212,23 @@ wait for a finger, show match/no-match, require finger removal, and return to
 READY. A match is local recognition only; it is not attendance or a backend
 event.
 
+## Milestone 2 Wi-Fi heartbeat
+
+The optional network service connects in the background and sends a HTTPS
+heartbeat every 15 seconds when configured. It does not block local fingerprint
+matching and does not store scans. The heartbeat contains only the stable
+device ID, firmware version, sensor readiness, and a zero pending-event count.
+
+1. Copy `secrets.example.h` to `secrets.h`; the latter is ignored by Git.
+2. Fill in the local Wi-Fi credentials, deployed heartbeat URL, provisioned
+   device secret, and the CA certificate for the HTTPS endpoint.
+3. Do not print or commit `secrets.h`.
+4. With valid configuration, Serial reports network state changes and the TFT
+   shows a small `ONLINE`/`OFFLINE` indicator below the local recognition UI.
+
+The backend boundary is the `device-heartbeat` Edge Function. Firmware never
+receives or contains a Supabase service-role key.
+
 Expected startup output includes:
 
 ```text

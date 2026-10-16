@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import type { CampusClass, Person, Tab } from "../lib/types";
+import type { CampusClass, Device, Person, Tab } from "../lib/types";
+import { deviceStatus, formatLastSeen } from "../lib/device_status";
 
 type OverviewProps = {
   classes: CampusClass[];
@@ -18,6 +19,8 @@ type OverviewProps = {
   connected: boolean;
   loading: boolean;
   isAdmin: boolean;
+  device: Device | null;
+  deviceError: string | null;
   onNavigate: (tab: Tab) => void;
 };
 
@@ -28,8 +31,11 @@ export function Overview({
   connected,
   loading,
   isAdmin,
+  device,
+  deviceError,
   onNavigate,
 }: OverviewProps) {
+  const terminalOnline = deviceStatus(device);
   const enrolled = students.filter(
     (student) => student.fingerprint_status === "enrolled",
   ).length;
@@ -123,6 +129,45 @@ export function Overview({
             <p>{detail}</p>
           </div>
         ))}
+      </section>
+      <section className="panel device-status-card">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">DEVICE HEALTH</span>
+            <h2>{device?.display_name || "CampusID Terminal 01"}</h2>
+          </div>
+          <Radio size={20} />
+        </div>
+        {deviceError ? (
+          <p className="system-note">{deviceError}</p>
+        ) : (
+          <>
+            <div className="device-status-heading">
+              <span
+                className={`status-dot ${terminalOnline ? "" : "offline"}`}
+              />
+              <strong>{terminalOnline ? "ONLINE" : "OFFLINE"}</strong>
+            </div>
+            <div className="device-health-grid">
+              <div>
+                <small>Fingerprint sensor</small>
+                <b>{device?.sensor_ready ? "Ready" : "Not ready"}</b>
+              </div>
+              <div>
+                <small>Last seen</small>
+                <b>{formatLastSeen(device?.last_seen_at || null)}</b>
+              </div>
+              <div>
+                <small>Pending sync</small>
+                <b>{device?.pending_event_count ?? 0}</b>
+              </div>
+              <div>
+                <small>Firmware</small>
+                <b>{device?.firmware_version || "—"}</b>
+              </div>
+            </div>
+          </>
+        )}
       </section>
       <div className="overview-grid">
         <section className="panel">
