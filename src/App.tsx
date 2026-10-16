@@ -12,6 +12,7 @@ import {
   Wifi,
   WifiOff,
   ShieldCheck,
+  CalendarDays,
 } from "lucide-react";
 import { configured, configurationError, supabase } from "./lib/supabase";
 import {
@@ -20,32 +21,13 @@ import {
   validateClassInput,
   validatePersonInput,
 } from "./lib/admin";
-type Cls = {
-  id: string;
-  name: string;
-  section: string;
-  academic_year: string | null;
-};
-type Person = {
-  id: string;
-  full_name: string;
-  role: "student" | "teacher";
-  roll_number: string | null;
-  employee_id: string | null;
-  class_id: string | null;
-  fingerprint_status: string;
-  active: boolean;
-  classes?: Cls | null;
-};
-type Tab = "overview" | "classes" | "students" | "teachers";
-type Notice = {
-  message: string;
-  kind: "success" | "error";
-};
+import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
+import { Overview } from "./components/Overview";
+import type { CampusClass, Person, Tab, Notice } from "./lib/types";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview"),
-    [classes, setClasses] = useState<Cls[]>([]),
+    [classes, setClasses] = useState<CampusClass[]>([]),
     [people, setPeople] = useState<Person[]>([]),
     [assignments, setAssignments] = useState<Record<string, string[]>>({}),
     [notice, setNotice] = useState<Notice | null>(null),
@@ -58,11 +40,13 @@ export default function App() {
     [authReady, setAuthReady] = useState(!supabase);
   const sessionRef = useRef<Session | null>(null);
   const sessionGeneration = useRef(0);
-  const [cn, setCn] = useState(""),
+  const refreshGeneration = useRef(0);
+  const mutationPending = useRef(false);
+  const [classNameInput, setClassNameInput] = useState(""),
     [section, setSection] = useState("A"),
     [year, setYear] = useState("2026-27"),
-    [name, setName] = useState(""),
-    [code, setCode] = useState(""),
+    [fullName, setFullName] = useState(""),
+    [identifier, setIdentifier] = useState(""),
     [studentClass, setStudentClass] = useState(""),
     [teacherClasses, setTeacherClasses] = useState<string[]>([]),
     [email, setEmail] = useState(""),
@@ -84,7 +68,7 @@ export default function App() {
   ) {
     return (
       sessionGeneration.current === generation &&
-      sessionRef.current === currentSession
+      sessionRef.current?.user.id === currentSession?.user.id
     );
   }
   async function refresh() {
@@ -100,6 +84,7 @@ export default function App() {
     }
     const currentSession = session;
     const generation = sessionGeneration.current;
+    const request = ++refreshGeneration.current;
     setBusy(true);
     try {
       const [c, p, a] = await Promise.all([
@@ -111,14 +96,18 @@ export default function App() {
         supabase.from("teacher_classes").select("teacher_id,class_id"),
       ]);
       const err = c.error || p.error || a.error;
-      if (!isCurrentSession(generation, currentSession)) return;
+      if (
+        !isCurrentSession(generation, currentSession) ||
+        request !== refreshGeneration.current
+      )
+        return;
       if (err) {
         setDbConnected(false);
         showNotice(databaseError(err), "error");
         return;
       }
       setDbConnected(true);
-      const classRows = (c.data || []) as Cls[];
+      const classRows = (c.data || []) as CampusClass[];
       setClasses(classRows);
       setPeople(
         ((p.data || []) as Person[]).map((person) => ({
@@ -134,26 +123,57 @@ export default function App() {
       }
       setAssignments(m);
     } catch (error) {
-      if (!isCurrentSession(generation, currentSession)) return;
+      if (
+        !isCurrentSession(generation, currentSession) ||
+        request !== refreshGeneration.current
+      )
+        return;
       setDbConnected(false);
       showNotice(caughtError(error), "error");
     } finally {
-      if (isCurrentSession(generation, currentSession)) setBusy(false);
+      if (
+        isCurrentSession(generation, currentSession) &&
+        request === refreshGeneration.current
+      )
+        setBusy(false);
     }
   }
   useEffect(() => {
     if (!supabase) return;
     let active = true;
     const generation = sessionGeneration.current;
+    function receiveSession(nextSession: Session | null) {
+      if (!active) return;
+      const identityChanged =
+        sessionRef.current?.user.id !== nextSession?.user.id;
+      sessionRef.current = nextSession;
+      setSession(nextSession);
+      setAuthReady(true);
+      // Token refresh and tab focus must not close an ongoing class session.
+      if (!identityChanged) return;
+      sessionGeneration.current += 1;
+      mutationPending.current = false;
+      setBusy(false);
+      setUserRole(null);
+      setRoleReady(false);
+      setClasses([]);
+      setPeople([]);
+      setAssignments({});
+      setDbConnected(false);
+      setNotice(null);
+      setPassword("");
+      setTab("overview");
+      setSearch("");
+      setFullName("");
+      setIdentifier("");
+      setStudentClass("");
+      setTeacherClasses([]);
+    }
     void supabase.auth
       .getSession()
       .then(({ data }) => {
         if (active && sessionGeneration.current === generation) {
-          sessionRef.current = data.session;
-          setSession(data.session);
-          setUserRole(null);
-          setRoleReady(false);
-          setAuthReady(true);
+          receiveSession(data.session);
         }
       })
       .catch((error: unknown) => {
@@ -165,13 +185,7 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      sessionGeneration.current += 1;
-      sessionRef.current = nextSession;
-      setBusy(false);
-      setSession(nextSession);
-      setUserRole(null);
-      setRoleReady(false);
-      setAuthReady(true);
+      receiveSession(nextSession);
     });
     return () => {
       active = false;
@@ -191,7 +205,9 @@ export default function App() {
           setUserRole(null);
           showNotice(databaseError(error), "error");
         } else {
-          setUserRole(data as string | null);
+          setUserRole(
+            data === "administrator" || data === "teacher" ? data : null,
+          );
         }
         setRoleReady(true);
       } catch (error) {
@@ -205,7 +221,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [session?.user.id]);
   async function signIn(e: FormEvent) {
     e.preventDefault();
     if (!supabase) return;
@@ -238,14 +254,17 @@ export default function App() {
   }
   async function addClass(e: FormEvent) {
     e.preventDefault();
-    if (!supabase || userRole !== "administrator") return;
-    const className = cn.trim();
+    if (!supabase || userRole !== "administrator" || mutationPending.current)
+      return;
+    const className = classNameInput.trim();
     const classSection = section.trim();
     const validationError = validateClassInput(className, classSection);
     if (validationError) {
       showNotice(validationError, "error");
       return;
     }
+    const generation = sessionGeneration.current;
+    mutationPending.current = true;
     setBusy(true);
     try {
       const { error } = await supabase.from("classes").insert({
@@ -253,28 +272,34 @@ export default function App() {
         section: classSection,
         academic_year: year.trim() || null,
       });
+      if (!isCurrentSession(generation, session)) return;
       if (error) {
         showNotice(databaseError(error), "error");
         return;
       }
-      setCn("");
+      setClassNameInput("");
       showNotice("Class created.");
       await refresh();
     } catch (error) {
-      showNotice(caughtError(error), "error");
+      if (isCurrentSession(generation, session))
+        showNotice(caughtError(error), "error");
     } finally {
-      setBusy(false);
+      if (isCurrentSession(generation, session)) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
     }
   }
   async function addPerson(e: FormEvent, role: "student" | "teacher") {
     e.preventDefault();
-    if (!supabase || userRole !== "administrator") return;
-    const personName = name.trim();
-    const identifier = code.trim();
+    if (!supabase || userRole !== "administrator" || mutationPending.current)
+      return;
+    const personName = fullName.trim();
+    const personIdentifier = identifier.trim();
     const validationError = validatePersonInput(
       role,
       personName,
-      identifier,
+      personIdentifier,
       studentClass,
       teacherClasses,
     );
@@ -282,6 +307,8 @@ export default function App() {
       showNotice(validationError, "error");
       return;
     }
+    const generation = sessionGeneration.current;
+    mutationPending.current = true;
     setBusy(true);
     setNotice(null);
     try {
@@ -290,10 +317,11 @@ export default function App() {
           "register_teacher_with_classes",
           {
             p_full_name: personName,
-            p_employee_id: identifier,
+            p_employee_id: personIdentifier,
             p_class_ids: [...new Set(teacherClasses)],
           },
         );
+        if (!isCurrentSession(generation, session)) return;
         if (teacherError) {
           showNotice(databaseError(teacherError), "error");
           return;
@@ -302,18 +330,19 @@ export default function App() {
         const { error } = await supabase.from("people").insert({
           full_name: personName,
           role,
-          roll_number: identifier,
+          roll_number: personIdentifier,
           employee_id: null,
           class_id: studentClass,
           fingerprint_status: "not_enrolled",
         });
+        if (!isCurrentSession(generation, session)) return;
         if (error) {
           showNotice(databaseError(error), "error");
           return;
         }
       }
-      setName("");
-      setCode("");
+      setFullName("");
+      setIdentifier("");
       setStudentClass("");
       setTeacherClasses([]);
       showNotice(
@@ -321,55 +350,102 @@ export default function App() {
       );
       await refresh();
     } catch (error) {
-      showNotice(caughtError(error), "error");
+      if (isCurrentSession(generation, session))
+        showNotice(caughtError(error), "error");
     } finally {
-      setBusy(false);
+      if (isCurrentSession(generation, session)) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
     }
   }
   async function activeToggle(p: Person) {
-    if (!supabase || userRole !== "administrator") return;
+    if (!supabase || userRole !== "administrator" || mutationPending.current)
+      return;
+    const generation = sessionGeneration.current;
+    mutationPending.current = true;
     setBusy(true);
     try {
       const { error } = await supabase
         .from("people")
         .update({ active: !p.active })
-        .eq("id", p.id);
+        .eq("id", p.id)
+        .select("id")
+        .single();
+      if (!isCurrentSession(generation, session)) return;
       showNotice(
         error ? databaseError(error) : `${p.full_name} updated.`,
         error ? "error" : "success",
       );
       if (!error) await refresh();
     } catch (error) {
-      showNotice(caughtError(error), "error");
+      if (isCurrentSession(generation, session))
+        showNotice(caughtError(error), "error");
     } finally {
-      setBusy(false);
+      if (isCurrentSession(generation, session)) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
     }
   }
+  function navigate(next: Tab) {
+    setTab(next);
+    setSearch("");
+    setFullName("");
+    setIdentifier("");
+    setStudentClass("");
+    setTeacherClasses([]);
+    setNotice(null);
+  }
+  const descriptions: Record<Tab, string> = {
+    overview: "A connected view of your campus, ready for the day ahead.",
+    attendance: "Open your class roster and make every presence count.",
+    classes: "The academic groups at the heart of your campus.",
+    students:
+      "Your student directory, class assignments, and enrollment status.",
+    teachers: "The people guiding your classes, all in one place.",
+  };
   const title =
     tab === "overview"
       ? "Overview"
-      : tab === "classes"
-        ? "Classes"
-        : tab === "students"
-          ? "Students"
-          : "Teachers";
+      : tab === "attendance"
+        ? "Attendance"
+        : tab === "classes"
+          ? "Classes"
+          : tab === "students"
+            ? "Students"
+            : "Teachers";
+  function classAssignment(person: Person) {
+    const classIds =
+      person.role === "teacher"
+        ? assignments[person.id] || []
+        : person.class_id
+          ? [person.class_id]
+          : [];
+    return classIds
+      .map((id) => {
+        const assignedClass = classes.find((item) => item.id === id);
+        return assignedClass
+          ? `${assignedClass.name}-${assignedClass.section}`
+          : "";
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
   const list = (tab === "students" ? students : teachers).filter((p) =>
-    [
-      p.full_name,
-      p.roll_number || "",
-      p.employee_id || "",
-      p.classes?.name || "",
-    ]
+    [p.full_name, p.roll_number || "", p.employee_id || "", classAssignment(p)]
       .join(" ")
       .toLowerCase()
-      .includes(search.toLowerCase()),
+      .includes(search.trim().toLowerCase()),
   );
   if (!configured) {
     return (
       <div className="auth-shell">
         <section className="auth-card">
-          <div className="logo"><Fingerprint /></div>
-          <p className="eyebrow">CAMPUSID ADMINISTRATION</p>
+          <div className="logo">
+            <Fingerprint />
+          </div>
+          <p className="eyebrow">CAMPUSID · CONNECTED CAMPUS</p>
           <h1>Connect your Supabase project</h1>
           <p>{configurationError}</p>
         </section>
@@ -377,15 +453,21 @@ export default function App() {
     );
   }
   if (!authReady) {
-    return <div className="auth-shell"><p>Loading sign-in…</p></div>;
+    return (
+      <div className="auth-shell">
+        <p>Loading sign-in…</p>
+      </div>
+    );
   }
   if (!session) {
     return (
       <div className="auth-shell">
         <form className="auth-card" onSubmit={signIn}>
-          <div className="logo"><Fingerprint /></div>
-          <p className="eyebrow">CAMPUSID ADMINISTRATION</p>
-          <h1>Sign in to continue</h1>
+          <div className="logo">
+            <Fingerprint />
+          </div>
+          <p className="eyebrow">CAMPUSID · CONNECTED CAMPUS</p>
+          <h1>Welcome to CampusID</h1>
           <p>Use an authorized administrator or teacher account.</p>
           <label>
             Email
@@ -407,27 +489,55 @@ export default function App() {
               autoComplete="current-password"
             />
           </label>
-          {notice && <div className={`notice ${notice.kind}`}>{notice.message}</div>}
-          <button className="primary" disabled={busy}>Sign in</button>
+          {notice && (
+            <div
+              className={`notice ${notice.kind}`}
+              role={notice.kind === "error" ? "alert" : "status"}
+            >
+              {notice.message}
+            </div>
+          )}
+          <button className="primary" disabled={busy}>
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
         </form>
       </div>
     );
   }
   if (!roleReady) {
-    return <div className="auth-shell"><p>Checking account permissions…</p></div>;
+    return (
+      <div className="auth-shell">
+        <p>Checking account permissions…</p>
+      </div>
+    );
   }
   if (!userRole) {
     return (
       <div className="auth-shell">
         <section className="auth-card">
-          <div className="logo"><ShieldCheck /></div>
-          <p className="eyebrow">CAMPUSID ADMINISTRATION</p>
-          <h1>Account not provisioned</h1>
+          <div className="logo">
+            <ShieldCheck />
+          </div>
+          <p className="eyebrow">CAMPUSID · CONNECTED CAMPUS</p>
+          <h1>
+            {notice?.kind === "error"
+              ? "Unable to verify your account"
+              : "Account not provisioned"}
+          </h1>
+          {notice && (
+            <div className={`notice ${notice.kind}`} role="alert">
+              {notice.message}
+            </div>
+          )}
           <p>
             This Auth account does not have an administrator or teacher role.
             Ask the project owner to assign one, then sign in again.
           </p>
-          <button className="primary" onClick={() => void signOut()}>
+          <button
+            className="primary"
+            onClick={() => void signOut()}
+            disabled={busy}
+          >
             Sign out
           </button>
         </section>
@@ -436,6 +546,9 @@ export default function App() {
   }
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <aside className="sidebar">
         <div className="brand">
           <div className="logo">
@@ -446,24 +559,28 @@ export default function App() {
             <small>ATTENDANCE SYSTEM</small>
           </div>
         </div>
-        <p className="navlabel">ADMINISTRATION</p>
-        {(
-          [
-            ["overview", "Overview", LayoutDashboard],
-            ["classes", "Classes", BookOpen],
-            ["students", "Students", GraduationCap],
-            ["teachers", "Teachers", Users],
-          ] as const
-        ).map(([id, label, Icon]) => (
-          <button
-            key={id}
-            className={"nav " + (tab === id ? "chosen" : "")}
-            onClick={() => setTab(id)}
-          >
-            <Icon size={18} />
-            {label}
-          </button>
-        ))}
+        <p className="navlabel">WORKSPACE</p>
+        <nav aria-label="Main navigation">
+          {(
+            [
+              ["overview", "Overview", LayoutDashboard],
+              ["attendance", "Attendance", CalendarDays],
+              ["classes", "Classes", BookOpen],
+              ["students", "Students", GraduationCap],
+              ["teachers", "Teachers", Users],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              className={"nav " + (tab === id ? "chosen" : "")}
+              onClick={() => navigate(id)}
+              aria-current={tab === id ? "page" : undefined}
+            >
+              <Icon size={18} />
+              {label}
+            </button>
+          ))}
+        </nav>
         <div className="device">
           <span className="dot offline" />
           <div>
@@ -478,12 +595,16 @@ export default function App() {
             <b>{userRole === "administrator" ? "Administrator" : "Teacher"}</b>
             <small>{session.user.email}</small>
           </div>
-          <button className="signout" onClick={() => void signOut()}>
+          <button
+            className="signout"
+            onClick={() => void signOut()}
+            disabled={busy}
+          >
             Sign out
           </button>
         </div>
       </aside>
-      <main>
+      <main id="main-content" tabIndex={-1}>
         <header>
           <span>
             Workspace <i>/</i> <b>{title}</b>
@@ -501,146 +622,106 @@ export default function App() {
             onClick={() => void refresh()}
             aria-label="Refresh database data"
             title="Refresh database data"
+            disabled={busy}
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={16} className={busy ? "spin" : ""} />
           </button>
         </header>
         <div className="content">
           <div className="heading">
             <div>
-              <small>COLLEGE RECORDS</small>
+              <small>CAMPUS WORKSPACE</small>
               <h1>{title}</h1>
-              <p>
-                Maintain the people and class records used by the attendance
-                system.
-              </p>
+              <p>{descriptions[tab]}</p>
             </div>
           </div>
-          {!configured && (
-            <div className="banner">
-              <ShieldCheck />
-              <div>
-                <b>Connect your Supabase database</b>
-                <p>
-                  Copy <code>.env.example</code> to <code>.env.local</code>, add
-                  your project URL and public key, then restart Vite.
-                </p>
-              </div>
-            </div>
-          )}
           {notice && (
-            <div className={`notice ${notice.kind}`}>
+            <div
+              className={`notice ${notice.kind}`}
+              role={notice.kind === "error" ? "alert" : "status"}
+            >
               {notice.message}
               <button onClick={() => setNotice(null)}>Dismiss</button>
             </div>
           )}
+          <div hidden={tab !== "attendance"}>
+            <AttendanceWorkspace
+              key={session.user.id}
+              classes={classes}
+              students={students}
+              userId={session.user.id}
+              notify={showNotice}
+            />
+          </div>
           {tab === "overview" && (
-            <>
-              <div className="stats">
-                {[
-                  [BookOpen, "Total classes", classes.length],
-                  [GraduationCap, "Students", students.length],
-                  [Users, "Teachers", teachers.length],
-                  [
-                    Fingerprint,
-                    "Fingerprints enrolled",
-                    people.filter((p) => p.fingerprint_status === "enrolled")
-                      .length,
-                  ],
-                ].map(([I, l, v]: any) => (
-                  <div className="stat" key={l}>
-                    <I />
-                    <small>{l}</small>
-                    <strong>{v}</strong>
-                    <p>Demo records</p>
-                  </div>
-                ))}
-              </div>
-              <div className="panel">
-                <h2>Start with the records</h2>
-                <p className="muted">
-                  Create classes first, then register the people assigned to
-                  them.
-                </p>
-                <div className="actions">
-                  <button onClick={() => setTab("classes")}>
-                    <BookOpen />
-                    Create a class <span>→</span>
-                  </button>
-                  <button onClick={() => setTab("students")}>
-                    <GraduationCap />
-                    Register a student <span>→</span>
-                  </button>
-                  <button onClick={() => setTab("teachers")}>
-                    <Users />
-                    Register a teacher <span>→</span>
-                  </button>
-                </div>
-                <h2>System status</h2>
-                <p>{dbConnected ? "✓" : "○"} Supabase connection</p>
-                <p>
-                  {classes.length ? "✓" : "○"} Create classes ({classes.length})
-                </p>
-                <p>
-                  {students.length && teachers.length ? "✓" : "○"} Register
-                  students and teachers
-                </p>
-                <p>
-                  ○ Fingerprint terminal integration is not configured
-                </p>
-              </div>
-            </>
+            <Overview
+              classes={classes}
+              students={students}
+              teachers={teachers}
+              connected={dbConnected}
+              loading={busy}
+              isAdmin={userRole === "administrator"}
+              onNavigate={navigate}
+            />
           )}
           {tab === "classes" && (
             <section className="panel">
-              <h2>Add a class</h2>
-              <p className="muted">Create classes before assigning people.</p>
-              {userRole !== "administrator" && (
-                <p className="muted">Only administrators can manage records.</p>
+              {userRole === "administrator" && (
+                <>
+                  <h2>Add a class</h2>
+                  <p className="muted">
+                    Create classes before assigning people.
+                  </p>
+                  <form onSubmit={addClass} className="form classform">
+                    <label>
+                      Class name
+                      <input
+                        required
+                        value={classNameInput}
+                        onChange={(e) => setClassNameInput(e.target.value)}
+                        placeholder="e.g. CSE"
+                      />
+                    </label>
+                    <label>
+                      Section
+                      <input
+                        required
+                        value={section}
+                        onChange={(e) => setSection(e.target.value)}
+                        placeholder="A"
+                      />
+                    </label>
+                    <label>
+                      Academic year
+                      <input
+                        value={year}
+                        onChange={(e) => setYear(e.target.value)}
+                        placeholder="2026-27"
+                      />
+                    </label>
+                    <button
+                      className="primary"
+                      disabled={busy || userRole !== "administrator"}
+                    >
+                      <Plus size={16} /> Add class
+                    </button>
+                  </form>
+                </>
               )}
-              <form onSubmit={addClass} className="form classform">
-                <label>
-                  Class name
-                  <input
-                    required
-                    value={cn}
-                    onChange={(e) => setCn(e.target.value)}
-                    placeholder="e.g. CSE"
-                  />
-                </label>
-                <label>
-                  Section
-                  <input
-                    required
-                    value={section}
-                    onChange={(e) => setSection(e.target.value)}
-                    placeholder="A"
-                  />
-                </label>
-                <label>
-                  Academic year
-                  <input
-                    value={year}
-                    onChange={(e) => setYear(e.target.value)}
-                    placeholder="2026-27"
-                  />
-                </label>
-                <button
-                  className="primary"
-                  disabled={busy || userRole !== "administrator"}
-                >
-                  <Plus size={16} /> Add class
-                </button>
-              </form>
-              <h2 className="subhead">All classes · {classes.length}</h2>
-              <div className="tablewrap">
+              <h2 className="subhead">Available classes · {classes.length}</h2>
+              <div
+                className="tablewrap"
+                tabIndex={0}
+                role="region"
+                aria-label="Records table, scroll horizontally on small screens"
+              >
                 <table>
                   <thead>
                     <tr>
-                      <th>Class</th>
-                      <th>Section</th>
-                      <th>Academic year</th>
-                      <th>ID</th>
+                      <th scope="col">Class</th>
+                      <th scope="col">Section</th>
+                      <th scope="col">Academic year</th>
+                      <th scope="col">ID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -659,99 +740,109 @@ export default function App() {
               </div>
               {!classes.length && (
                 <p className="empty">
-                  No classes yet. Create your first class above.
+                  {busy
+                    ? "Loading classes…"
+                    : userRole === "administrator"
+                      ? "No classes yet. Create your first class above."
+                      : "No assigned classes yet. Ask your administrator to assign one."}
                 </p>
               )}
             </section>
           )}
           {(tab === "students" || tab === "teachers") && (
             <>
-              <section className="panel">
-                <h2>Register a {tab === "students" ? "student" : "teacher"}</h2>
-                <p className="muted">
-                  {tab === "students"
-                    ? "Each student is assigned to one class."
-                    : "Teachers can be assigned to multiple classes."}
-                </p>
-                <form
-                  className="form"
-                  onSubmit={(e) =>
-                    void addPerson(
-                      e,
-                      tab === "students" ? "student" : "teacher",
-                    )
-                  }
-                >
-                  <label>
-                    Full name
-                    <input
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="Enter full name"
-                    />
-                  </label>
-                  <label>
-                    {tab === "students" ? "Roll number" : "Employee ID"}
-                    <input
-                      required
-                      value={code}
-                      onChange={(e) => setCode(e.target.value)}
-                      placeholder={
-                        tab === "students" ? "e.g. 26CS001" : "e.g. EMP014"
-                      }
-                    />
-                  </label>
-                  {tab === "students" ? (
-                    <label>
-                      Assigned class
-                      <select
-                        required
-                        value={studentClass}
-                        onChange={(e) => setStudentClass(e.target.value)}
-                      >
-                        <option value="">Select class</option>
-                        {classes.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}-{c.section} {c.academic_year || ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <fieldset>
-                      <legend>Assigned classes</legend>
-                      {classes.length ? (
-                        classes.map((c) => (
-                          <label className="check" key={c.id}>
-                            <input
-                              type="checkbox"
-                              checked={teacherClasses.includes(c.id)}
-                              onChange={(e) =>
-                                setTeacherClasses((old) =>
-                                  e.target.checked
-                                    ? [...old, c.id]
-                                    : old.filter((x) => x !== c.id),
-                                )
-                              }
-                            />
-                            {c.name}-{c.section}
-                          </label>
-                        ))
-                      ) : (
-                        <small>Create a class first.</small>
-                      )}
-                    </fieldset>
-                  )}
-                  <button
-                    className="primary"
-                    disabled={busy || userRole !== "administrator" || !classes.length}
+              {userRole === "administrator" && (
+                <section className="panel">
+                  <h2>
+                    Register a {tab === "students" ? "student" : "teacher"}
+                  </h2>
+                  <p className="muted">
+                    {tab === "students"
+                      ? "Each student is assigned to one class."
+                      : "Teachers can be assigned to multiple classes."}
+                  </p>
+                  <form
+                    className="form"
+                    onSubmit={(e) =>
+                      void addPerson(
+                        e,
+                        tab === "students" ? "student" : "teacher",
+                      )
+                    }
                   >
-                    <Plus size={16} /> Register{" "}
-                    {tab === "students" ? "student" : "teacher"}
-                  </button>
-                </form>
-              </section>
+                    <label>
+                      Full name
+                      <input
+                        required
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Enter full name"
+                      />
+                    </label>
+                    <label>
+                      {tab === "students" ? "Roll number" : "Employee ID"}
+                      <input
+                        required
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
+                        placeholder={
+                          tab === "students" ? "e.g. 26CS001" : "e.g. EMP014"
+                        }
+                      />
+                    </label>
+                    {tab === "students" ? (
+                      <label>
+                        Assigned class
+                        <select
+                          required
+                          value={studentClass}
+                          onChange={(e) => setStudentClass(e.target.value)}
+                        >
+                          <option value="">Select class</option>
+                          {classes.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}-{c.section} {c.academic_year || ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <fieldset>
+                        <legend>Assigned classes</legend>
+                        {classes.length ? (
+                          classes.map((c) => (
+                            <label className="check" key={c.id}>
+                              <input
+                                type="checkbox"
+                                checked={teacherClasses.includes(c.id)}
+                                onChange={(e) =>
+                                  setTeacherClasses((old) =>
+                                    e.target.checked
+                                      ? [...old, c.id]
+                                      : old.filter((x) => x !== c.id),
+                                  )
+                                }
+                              />
+                              {c.name}-{c.section}
+                            </label>
+                          ))
+                        ) : (
+                          <small>Create a class first.</small>
+                        )}
+                      </fieldset>
+                    )}
+                    <button
+                      className="primary"
+                      disabled={
+                        busy || userRole !== "administrator" || !classes.length
+                      }
+                    >
+                      <Plus size={16} /> Register{" "}
+                      {tab === "students" ? "student" : "teacher"}
+                    </button>
+                  </form>
+                </section>
+              )}
               <section className="panel">
                 <div className="listhead">
                   <div>
@@ -764,19 +855,27 @@ export default function App() {
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Search name, ID or class"
+                      aria-label={`Search ${tab}`}
                     />
                   </label>
                 </div>
-                <div className="tablewrap">
+                <div
+                  className="tablewrap"
+                  tabIndex={0}
+                  role="region"
+                  aria-label="Records table, scroll horizontally on small screens"
+                >
                   <table>
                     <thead>
                       <tr>
-                        <th>Name / ID</th>
-                        <th>Role</th>
-                        <th>Class assignment</th>
-                        <th>Fingerprint status</th>
-                        <th>Account</th>
-                        <th>Action</th>
+                        <th scope="col">Name / ID</th>
+                        <th scope="col">Role</th>
+                        <th scope="col">Class assignment</th>
+                        <th scope="col">Fingerprint status</th>
+                        <th scope="col">Account</th>
+                        {userRole === "administrator" && (
+                          <th scope="col">Action</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
@@ -812,29 +911,39 @@ export default function App() {
                               {p.active ? "Active" : "Inactive"}
                             </span>
                           </td>
-                          <td>
-                            <button
-                              className="outline"
-                              onClick={() => void activeToggle(p)}
-                              disabled={busy}
-                            >
-                              {p.active ? "Deactivate" : "Activate"}
-                            </button>
-                          </td>
+                          {userRole === "administrator" && (
+                            <td>
+                              <button
+                                className="outline"
+                                onClick={() => void activeToggle(p)}
+                                disabled={busy}
+                              >
+                                {p.active ? "Deactivate" : "Activate"}
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                {!list.length && <p className="empty">No records found.</p>}
+                {!list.length && (
+                  <p className="empty">
+                    {busy
+                      ? "Loading records…"
+                      : search
+                        ? "No matches. Try a different name, ID, or class."
+                        : `No ${tab} available yet.`}
+                  </p>
+                )}
               </section>
             </>
           )}
           <footer>
-            CampusID demo prototype{" "}
+            CampusID · Connected campus prototype{" "}
             <span>
-              Fingerprint templates remain in the R307 sensor; the database
-              stores slot mappings.
+              Fingerprints stay on the sensor. Terminal integration is in
+              progress.
             </span>
           </footer>
         </div>

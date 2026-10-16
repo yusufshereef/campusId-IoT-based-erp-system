@@ -77,9 +77,9 @@ describe("database error messages", () => {
 
   it("handles missing, permission, and unknown database errors", () => {
     expect(databaseError(null)).toBe("");
-    expect(
-      databaseError({ code: "42501", message: "permission denied" }),
-    ).toBe("The database rejected this request. Check the current RLS policies.");
+    expect(databaseError({ code: "42501", message: "permission denied" })).toBe(
+      "The database rejected this request. Check the current RLS policies.",
+    );
     expect(databaseError({ code: "99999", message: "database detail" })).toBe(
       "database detail",
     );

@@ -1,5 +1,11 @@
 # CampusID Engineering Plan
 
+> Historical engineering/security log. For the current interface, verification
+> scope and design, read [IMPLEMENTATION.md](IMPLEMENTATION.md). For installation,
+> use the [root README](../README.md). The test counts and "next approved work"
+> below describe earlier sessions, not the results of the October 16 UI review.
+> The proposed hardware/backend sequence is in [EXPO_ROADMAP.md](EXPO_ROADMAP.md).
+
 ## Product direction
 
 CampusID is a college attendance ERP with a React/Vite browser application,
@@ -17,7 +23,11 @@ authorization and data integrity take priority over feature breadth.
 - Browser access to fingerprint mappings is blocked.
 - Classes, students, teachers, assignments, activation, and search are
   implemented.
-- Attendance and hardware enrollment are not implemented.
+- The teacher attendance interface uses client-side class/date sessions backed
+  by `attendance_records`; persistent attendance-session entities are not
+  implemented.
+- Hardware enrollment, trusted device ingestion, and offline synchronization
+  are not implemented.
 
 ## Security foundation status
 
@@ -37,6 +47,9 @@ authorization and data integrity take priority over feature breadth.
   `authenticated` to the disposable security workflow.
 - Applied the security and least-privilege migrations to the disposable local
   Supabase stack and completed both SQL workflows with final `ROLLBACK`.
+- Added attendance records with active-student validation, duplicate
+  prevention, class-scoped RLS, immutable attribution, and audit rows for
+  corrections.
 
 ### Not verified
 
@@ -62,6 +75,13 @@ authorization and data integrity take priority over feature breadth.
   including the `anon` and `authenticated` schema `CREATE` assertions.
 - Updated security and least-privilege migrations: applied to the disposable
   local Supabase stack with `psql -v ON_ERROR_STOP=1`.
+- `20261016001000_attendance_records.sql`: applied to the disposable local
+  Supabase stack with `psql -v ON_ERROR_STOP=1`.
+- `attendance-workflow.sql`: passed with exit code 0 and final `ROLLBACK`.
+- Attendance catalog verification: authenticated `SELECT, INSERT, UPDATE`
+  on attendance records, admin-only audit reads, no anonymous grants, and
+  security-definer trigger functions owned by `postgres` with
+  `search_path=pg_catalog, public`.
 
 ## Reviewed migration order
 
@@ -69,8 +89,9 @@ authorization and data integrity take priority over feature breadth.
 2. `supabase/migrations/20261010234000_register_teacher_with_classes.sql`
 3. `supabase/migrations/20261015223000_secure_auth_and_rls.sql`
 4. `supabase/migrations/20261015233000_least_privilege_table_grants.sql`
-5. Provision the first administrator manually in `user_roles`.
-6. Run the disposable workflow and security SQL tests.
+5. `supabase/migrations/20261016001000_attendance_records.sql`
+6. Provision the first administrator manually in `user_roles`.
+7. Run the disposable workflow, security SQL test, and attendance SQL test.
 
 ## Next security-verification procedure
 
@@ -132,12 +153,12 @@ Before dependent ERP or IoT features:
 2. Query effective grants, policies, function ownership, and function
    configuration.
 3. Resolve any deployment-specific Auth or SQL Editor behavior.
-4. Only then plan attendance schema or device/backend authentication.
+4. Review the client-side attendance workflow before adding device/backend
+   authentication or offline synchronization.
 
 ## Explicit non-goals for the current security task
 
 - Do not apply migrations to the configured/production Supabase project.
-- Do not add attendance features.
 - Do not add hardware enrollment.
 - Do not expose biometric templates or fingerprint mappings to the browser.
 - Do not grant administrator access through frontend state or client claims.

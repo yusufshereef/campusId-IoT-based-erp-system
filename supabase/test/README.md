@@ -9,9 +9,11 @@
    `../migrations/` in timestamp order:
    `20261010234000_register_teacher_with_classes.sql`, followed by
    `20261015223000_secure_auth_and_rls.sql`, followed by
-   `20261015233000_least_privilege_table_grants.sql`.
-3. Confirm the five tables, secure policies, helper functions, and the
-   administrator-only RPC exist in the test project's SQL editor.
+   `20261015233000_least_privilege_table_grants.sql`, followed by
+   `20261016001000_attendance_records.sql`.
+3. Confirm the seven application tables, secure policies, helper functions,
+   attendance triggers, and the administrator-only RPC exist in the test
+   project's SQL editor.
 4. Paste and run `isolated-admin-workflow.sql`. It runs the valid two-class
    registration, duplicate employee test, invalid class test, and verification
    query in one transaction, then rolls back.
@@ -26,6 +28,12 @@ privilege on the `public` schema for `anon` and `authenticated`. It also ends
 with `rollback`.
 The script must be run by a project owner or database role that can create
 temporary rows in `auth.users`; never run it against production data.
+
+Run `attendance-workflow.sql` after the security workflow. It verifies active
+student validation, duplicate prevention, class-scoped teacher access,
+administrator corrections with immutable attribution and audit rows,
+historical visibility after deactivation, and fingerprint-mapping isolation.
+It also ends with `rollback`.
 
 The RPC requires a real authenticated administrator context; a privileged SQL
 editor session without `auth.uid()` is intentionally denied. If SQL Editor
@@ -55,10 +63,14 @@ psql "$DB_URL" -v ON_ERROR_STOP=1 \
   -f supabase/migrations/20261015223000_secure_auth_and_rls.sql
 psql "$DB_URL" -v ON_ERROR_STOP=1 \
   -f supabase/migrations/20261015233000_least_privilege_table_grants.sql
+psql "$DB_URL" -v ON_ERROR_STOP=1 \
+  -f supabase/migrations/20261016001000_attendance_records.sql
 psql "$DB_URL" \
   -v ON_ERROR_STOP=1 -f supabase/test/isolated-admin-workflow.sql
 psql "$DB_URL" \
   -v ON_ERROR_STOP=1 -f supabase/test/security-rls-workflow.sql
+psql "$DB_URL" \
+  -v ON_ERROR_STOP=1 -f supabase/test/attendance-workflow.sql
 supabase stop
 ```
 
@@ -89,7 +101,9 @@ same session before retrying. Never leave a failed test transaction open.
    `supabase/test/isolated-admin-workflow.sql`.
 7. In a new SQL Editor query, paste and run
    `supabase/test/security-rls-workflow.sql`.
-8. Run the catalog verification query below.
+8. In a new SQL Editor query, paste and run
+   `supabase/test/attendance-workflow.sql`.
+9. Run the catalog verification query below.
 
 Do not use the configured application project, real records, real Auth users,
 or biometric data. If a script errors before its final `rollback`, execute
@@ -106,7 +120,8 @@ from information_schema.role_table_grants
 where table_schema = 'public'
   and table_name in (
     'classes', 'people', 'teacher_classes',
-    'fingerprint_mappings', 'user_roles'
+    'fingerprint_mappings', 'user_roles',
+    'attendance_records', 'attendance_record_audit'
   )
 order by grantee, table_name, privilege_type;
 

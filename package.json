@@ -1,1 +1,34 @@
-{"name":"college-attendance-demo","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"vite","build":"tsc -b && vite build","test":"vitest run","preview":"vite preview"},"dependencies":{"@supabase/supabase-js":"^2.57.0","lucide-react":"^0.468.0","react":"^18.3.1","react-dom":"^18.3.1"},"devDependencies":{"@types/react":"^18.3.12","@types/react-dom":"^18.3.1","@vitejs/plugin-react":"^4.3.4","typescript":"~5.6.3","vite":"^6.0.1","vitest":"^5.0.3"}}
+{
+  "name": "college-attendance-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "format": "prettier --write src package.json index.html",
+    "format:check": "prettier --check src package.json index.html",
+    "check": "npm run typecheck && npm test && npm run format:check && npm run build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "prettier": "^3.9.10",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.1",
+    "vitest": "^5.0.3"
+  }
+}
