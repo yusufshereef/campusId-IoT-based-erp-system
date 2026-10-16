@@ -1,140 +1,73 @@
-# CampusID Local Setup
+# Setup Reference
 
-This guide covers the current React/Vite app and ESP32 terminal from a fresh machine. The app uses a Supabase project for authentication and data; the firmware uses a separate local configuration file for Wi-Fi and device authentication.
+Use [README.md](./README.md) for the normal fresh-machine walkthrough. This document adds project-specific configuration details and recovery checks without repeating the full onboarding sequence.
 
-## Requirements
+## Frontend environment
 
-- Git
-- Node.js matching the `engines` range in `package.json` and npm
-- A Supabase project and its browser-safe project URL and publishable (or legacy anon) key
-- For firmware: Arduino IDE, Espressif ESP32 board support, and the libraries listed below
-- For cloud administration with the Supabase CLI: install the CLI for your OS and authenticate it
+The frontend reads `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from `.env.local`; [`.env.example`](./.env.example) is the safe starter template. The second variable name is retained for compatibility and can contain the project's publishable key or legacy anon key. Vite exposes `VITE_*` values in the client bundle, so never place a service-role or other secret key there.
 
-The repository does not contain a `supabase/config.toml`; the CLI is optional for running the frontend and firmware. Do not put a service-role key in the frontend or firmware.
+If you change `.env.local` while Vite is running, stop and restart the dev server. A missing or malformed URL should be handled as an app configuration problem; it does not indicate a firmware or database failure.
 
-## Get the project and run the frontend
+## Supabase CLI workflow
 
-### Windows PowerShell
+The repository has no `supabase/config.toml`. CLI linking is for the remote project and is not required to run the frontend. The production project is `erp-fingerprint`, ref `pxophxwlxaqiqfxssoqg`.
 
-```powershell
-git clone https://github.com/yusufshereef/campusId-IoT-based-erp-system.git
-Set-Location campusId-IoT-based-erp-system
-git switch expo-v1
-npm ci
-Copy-Item .env.example .env.local
-npm run dev
-```
-
-### macOS Terminal
+After installing the CLI for your platform, authenticate and link from the repository root:
 
 ```sh
-git clone https://github.com/yusufshereef/campusId-IoT-based-erp-system.git
-cd campusId-IoT-based-erp-system
-git switch expo-v1
-npm ci
-cp .env.example .env.local
-npm run dev
-```
-
-Edit `.env.local` with values from your Supabase project:
-
-```dotenv
-VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_LEGACY_ANON_KEY
-```
-
-The two names above are the frontend's required Vite variables. The key is delivered to the browser, so use only a publishable/anon key. `.env.local` is ignored by Git. Restart the Vite dev server after changing it. Open the local URL printed by `npm run dev`.
-
-## Supabase CLI (optional)
-
-The CLI is for project administration; it is not needed for `npm run dev`. Install the Supabase CLI using its current installation method for Windows or macOS, then authenticate and link the working directory when needed:
-
-```sh
+supabase --version
 supabase login
 supabase link --project-ref pxophxwlxaqiqfxssoqg
+supabase migration list --linked
 ```
 
-PowerShell uses the same CLI commands after installation. The project reference is `pxophxwlxaqiqfxssoqg`. No database migration or Edge Function deployment is performed by this setup guide. Use a development project for local development and a separate disposable project for SQL tests. Review the project's existing migration history before applying schema changes.
+If the CLI is invoked through npm rather than a system install, use `npx supabase --version` and prefix the commands with `npx`.
 
-## Arduino IDE and ESP32 firmware
-
-1. Install Arduino IDE and Espressif ESP32 board support using Boards Manager.
-2. Select **ESP32 Dev Module** and the connected board's USB port.
-3. Install these libraries with Arduino Library Manager:
-   - Adafruit GFX Library
-   - Adafruit ILI9341
-   - Adafruit Fingerprint Sensor Library
-4. Open this exact sketch: `firmware/campusid-terminal/campusid-terminal.ino`.
-5. Keep the companion `.cpp` and `.h` files in `firmware/campusid-terminal/` so the sketch can compile them.
-6. Copy `firmware/campusid-terminal/secrets.example.h` to `firmware/campusid-terminal/secrets.h` and edit the local copy as described below.
-7. Select **ESP32 Dev Module**, verify/compile, then upload when the hardware is wired and checked. Open Serial Monitor at **115200 baud**. R307S UART is **57600 baud**.
-
-### Private firmware configuration
-
-The ignored local `secrets.h` must define the macros used by firmware:
-
-- `CAMPUSID_WIFI_SSID`
-- `CAMPUSID_WIFI_PASSWORD`
-- `CAMPUSID_HEARTBEAT_URL`
-- `CAMPUSID_COMMAND_URL`
-- `CAMPUSID_DEVICE_SECRET`
-- `CAMPUSID_SUPABASE_ROOT_CA`
-
-The example template contains the current project endpoint paths. Replace Wi-Fi and device placeholders locally, and provide the trusted HTTPS CA certificate in the expected C string format. Keep the real file private: do not paste its contents into logs, commit it, or share it. The backend stores the device secret hash; firmware uses the corresponding local plaintext device secret. Never use `setInsecure()` or a Supabase service-role key in firmware.
-
-Windows copy command:
-
-```powershell
-Copy-Item firmware/campusid-terminal/secrets.example.h firmware/campusid-terminal/secrets.h
-```
-
-macOS copy command:
+Before applying a migration or deploying a function, verify that the linked ref is the intended project and review the change. These commands modify hosted state and are not part of routine app startup:
 
 ```sh
-cp firmware/campusid-terminal/secrets.example.h firmware/campusid-terminal/secrets.h
+supabase db push --linked
+supabase functions deploy <function-name> --project-ref pxophxwlxaqiqfxssoqg
 ```
 
-## Verified terminal wiring
+There is currently no `supabase/config.toml` in this checkout. If the CLI requires local project configuration for a migration operation, stop and review the setup rather than initializing or applying changes automatically.
 
-Pin assignments below are the current firmware configuration. Confirm module labels, voltage, current requirements, and common ground before connecting power.
+Heartbeat and device-command endpoints authenticate with the device-specific secret header, so their established gateway deployment uses `--no-verify-jwt`. Do not change endpoint authentication settings as part of local setup. Function service-role credentials belong only in the hosted function environment, never in browser configuration or firmware.
 
-| Device signal | ESP32 connection |
-| --- | ---: |
-| R307S TX → ESP32 UART2 RX | GPIO16 |
-| ESP32 UART2 TX → R307S RX | GPIO17 |
-| R307S UART | 57600 baud, 8N1 |
-| TFT CS | GPIO5 |
-| TFT DC | GPIO2 |
-| TFT RESET | GPIO4 |
-| TFT MOSI | GPIO23 |
-| TFT SCK | GPIO18 |
-| TFT MISO | GPIO19 |
-| TFT rotation | 2 |
+## Firmware configuration and startup diagnosis
 
-The selected display driver is ILI9341. The keypad and buzzer are disabled in the current hardware configuration; GPIO2 is used by the TFT DC signal. Do not connect the buzzer to GPIO2 in this setup.
+The Arduino sketch is [campusid-terminal.ino](./firmware/campusid-terminal/campusid-terminal.ino). Arduino compiles its companion source files from the same `firmware/campusid-terminal/` directory. Keep the ignored `secrets.h` there beside `secrets.example.h`.
 
-## Troubleshooting
+The template defines the six symbols consumed by `network_service.cpp`: Wi-Fi SSID/password, heartbeat URL, command URL, device secret, and Supabase root CA. If firmware reports missing configuration, first confirm the active sketch path and the local file's presence; compare macro names without copying credential values to Serial or chat. A config-present message does not prove that Wi-Fi credentials, endpoint reachability, TLS trust, or device authentication are valid.
 
-- **Vite reports missing Supabase configuration:** verify `.env.local` contains the two required `VITE_*` keys and restart `npm run dev`.
-- **Authentication or project errors:** check that the URL and browser-safe key belong to the intended Supabase project and that the account is provisioned there.
-- **CLI says the directory is not linked:** run `supabase login`, then `supabase link --project-ref pxophxwlxaqiqfxssoqg` from the repository root.
-- **Firmware reports missing network configuration:** confirm the active sketch is `firmware/campusid-terminal/campusid-terminal.ino`, and that `secrets.h` is beside it with all six expected macro names. Do not print the macro values while debugging.
-- **Wi-Fi does not connect:** check local SSID/password, 2.4 GHz network availability, board power, and serial output at 115200 baud.
-- **Heartbeat TLS/authentication fails:** verify the heartbeat URL, CA certificate, and locally configured device secret; verify that the backend device record uses the hash for that secret. Do not disable certificate validation.
-- **Fingerprint sensor is unavailable:** check suitable sensor power, common ground, crossed TX/RX wiring (sensor TX to GPIO16, sensor RX to GPIO17), and 57600 baud.
-- **TFT is blank or incorrect:** verify ILI9341 selection, module labels, power, common ground, and the pin map above. Stop and recheck wiring if the module pinout is uncertain.
-- **Upload fails:** confirm ESP32 board support, **ESP32 Dev Module**, USB port, cable, and required libraries.
+For serial checks, use 115200 baud. The sensor communicates at 57600 baud over UART2: sensor TX to GPIO16 and sensor RX to GPIO17. Windows assigns a COM port; macOS commonly shows a `/dev/cu.*` device. Select the port that appears when the board is connected rather than relying on a fixed name.
 
-## New-machine checklist
+When investigating a failed heartbeat, check in this order:
 
-- [ ] Clone the repository and switch to `expo-v1`.
-- [ ] Install a Node.js version allowed by `package.json` and run `npm ci`.
-- [ ] Copy `.env.example` to `.env.local`, fill the local Supabase URL/key, and keep it untracked.
-- [ ] Run `npm run dev` and confirm the app opens.
-- [ ] If administering Supabase, install/authenticate the CLI and link the intended project.
-- [ ] Install Arduino IDE, ESP32 board support, and the three required Adafruit libraries.
-- [ ] Copy `secrets.example.h` to `secrets.h`; fill local Wi-Fi/device settings and CA certificate without committing the file.
-- [ ] Open the exact sketch path above and select **ESP32 Dev Module**.
-- [ ] Verify wiring and power against the table; use Serial Monitor at 115200 baud after upload.
+1. The Wi-Fi association status and configured SSID (never log its password).
+2. The heartbeat URL host/path and whether the secure request begins successfully.
+3. The trusted CA certificate validity and system time/connectivity conditions.
+4. The HTTP status. An HTTP authentication failure means the request reached the service but the configured device secret does not match the backend hash.
 
-`.env.local` and `secrets.h` are machine-local configuration. R307S fingerprint templates are stored on the physical sensor and are not reproduced by cloning the repository.
+Do not use `WiFiClientSecure::setInsecure()` to bypass certificate verification. Keep the device secret plaintext only in the ignored local file; the database stores its hash.
+
+## Physical setup checks
+
+Use the pin table in [README.md](./README.md) and verify the board and module silkscreen before applying power. The firmware selects ILI9341, display rotation 2, and the listed TFT SPI pins. GPIO2 is occupied by TFT DC; keypad and buzzer are disabled. Power rails, UART logic levels, current requirements, and common ground must be checked against the actual modules; GPIO pins are not power supplies.
+
+The firmware uses the sensor-reported capacity at runtime. The current tested R307S reported capacity 1000, but another sensor may report a different value. Do not replace the runtime reading with a hardcoded marketing capacity.
+
+### Destructive sensor maintenance
+
+The sketch accepts the Serial command `RESET FINGERPRINT DATABASE`. It clears all fingerprint templates stored on the physical R307S and is not executed automatically at boot. Do not send it during normal setup or troubleshooting unless intentionally erasing the sensor and prepared to re-enroll templates. Backend mappings and sensor templates are separate state; resetting the sensor can leave mappings that no longer correspond to a stored template.
+
+## Additional recovery checks
+
+- If `npm install` or the Vite build reports an unsupported Node version, compare `node --version` with the `engines` range in `package.json`.
+- If `supabase migration list --linked` fails, confirm CLI login, the repository root, and the intended linked ref before running write commands.
+- If `secrets.h` exists but `WiFi.begin()` is not reached, confirm that the Arduino IDE opened the sketch in this repository, not a stale duplicate folder. Keep only safe serial diagnostics; do not expose macro contents.
+- If Wi-Fi connects but HTTPS fails, preserve CA verification and check the endpoint/CA before investigating device authentication. Do not rotate credentials as a first diagnostic step.
+- If the screen remains blank, confirm the selected ILI9341 adapter and wiring; verify the display's own power and pin labels rather than assuming its header order.
+- If the fingerprint sensor does not become ready, verify suitable sensor power, ground, crossed TX/RX, and 57600 baud. The TFT and ERP setup do not validate UART wiring.
+
+Real `.env.local` and `secrets.h` files are machine-local and ignored. The physical R307S template database is not included in Git or restored by cloning the repository.

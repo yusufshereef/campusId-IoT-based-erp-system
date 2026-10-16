@@ -1,211 +1,211 @@
-# CampusID · Connected campus
+# CampusID
 
-An expo-focused IoT attendance prototype: a React + TypeScript workspace, Supabase authentication and PostgreSQL authorization, and an ESP32/R307S fingerprint terminal.
+CampusID is an IoT fingerprint attendance ERP built with React, TypeScript, and Vite; Supabase Auth, PostgreSQL, and Edge Functions; and an ESP32 DevKit V1 / ESP32-WROOM-32 terminal with an R307S fingerprint sensor and ILI9341 TFT.
 
-**Working in source:** administrator and teacher sign-in, class/student/teacher registration, assignments, activation, search, manual attendance with corrections, terminal health, and administrator-triggered remote fingerprint enrollment. Attendance events and offline synchronization remain out of scope.
+Raw fingerprints are never uploaded. Fingerprint templates remain on the R307S; the backend stores mapping metadata only.
 
-- [Implementation and design](docs/IMPLEMENTATION.md)
-- [Local development setup](SETUP.md)
-- [Hardware feasibility and expo roadmap](docs/EXPO_ROADMAP.md)
-- [Firmware setup and existing wiring](firmware/campusid-terminal/README.md)
-- [Disposable database tests](supabase/test/README.md)
-- [Earlier engineering/security history](docs/ENGINEERING_PLAN.md)
+## Local Development Setup
 
-## 1. Prerequisites
+Follow these steps to run the ERP and prepare the terminal firmware on a new Windows or macOS machine. `expo-v1` is the current development branch.
 
-- Git.
-- Node.js **22.12+ in the 22.x line, 24.x, or 26+**, and npm. Node 20 is no longer supported by the installed Vitest/Supabase versions. `.nvmrc` selects the current Node 22 release.
-- A Supabase development project. Use a separate disposable project for SQL tests.
-- For firmware: Arduino IDE, Espressif ESP32 board support, and the three Adafruit libraries listed below.
+### 1. Prerequisites
 
-On macOS, if Git reports an invalid developer path, install/repair the Apple command-line tools with `xcode-select --install`. Restart the terminal, then check `git --version`, `node --version`, and `npm --version`.
+- Git
+- Node.js and npm. The required Node versions are listed in [`package.json`](./package.json) (`engines` field).
+- A Supabase project and its project URL and publishable/legacy anon key
+- Supabase CLI for project administration
+- Arduino IDE 2.x and Espressif ESP32 board support for firmware
+- VS Code is optional
 
-## 2. Clone and install
+On macOS, if Git reports an invalid developer path, install Apple command-line tools with `xcode-select --install`, then open a new terminal.
 
-```bash
+### 2. Clone the repository
+
+**Windows PowerShell**
+
+```powershell
+git clone https://github.com/yusufshereef/campusId-IoT-based-erp-system.git
+Set-Location campusId-IoT-based-erp-system
+git fetch origin
+git switch expo-v1
+git branch --show-current
+git log -1 --oneline
+```
+
+**macOS Terminal**
+
+```sh
 git clone https://github.com/yusufshereef/campusId-IoT-based-erp-system.git
 cd campusId-IoT-based-erp-system
-# Optional, if nvm is installed:
-nvm install
-nvm use
-npm ci
+git fetch origin
+git switch expo-v1
+git branch --show-current
+git log -1 --oneline
+```
+
+The branch command should print `expo-v1`. The checkpoint tag `expo-checkpoint-2026-10-17` marks a saved development checkpoint; normal work should continue on `expo-v1`.
+
+### 3. Install and run the frontend
+
+```sh
+npm install
+```
+
+Create the local environment file.
+
+**Windows PowerShell**
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+**macOS / Linux**
+
+```sh
 cp .env.example .env.local
 ```
 
-PowerShell users can replace the last command with `Copy-Item .env.example .env.local` and install a supported Node version directly if they do not use nvm. Use `npm ci` for a reproducible install from the committed lockfile.
-
-Edit `.env.local`:
+Edit `.env.local` with the two required values from your Supabase project settings:
 
 ```dotenv
 VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_LEGACY_ANON_KEY
 ```
 
-Find both values under Supabase Project Settings → API. The variable retains its legacy `ANON_KEY` name but accepts a publishable key. Vite embeds these values in the browser bundle: **never use a service-role or secret key**. Keep `.env.local` untracked; restart Vite after editing it. Missing or malformed project URLs show a setup screen instead of crashing startup.
+The `VITE_SUPABASE_ANON_KEY` variable accepts a publishable key or legacy anon key. These frontend values are bundled for browser use: **never use a service-role or secret key here**. `.env.local` is ignored by Git and must not be committed. Restart the dev server after editing it.
 
-## 3. Initialize a new development database
+Start Vite:
 
-In the **development project's** Supabase SQL Editor, paste and run each file separately, in this order. Stop on any error:
-
-1. [`supabase/schema.sql`](supabase/schema.sql)
-2. [`20261010234000_register_teacher_with_classes.sql`](supabase/migrations/20261010234000_register_teacher_with_classes.sql)
-3. [`20261015223000_secure_auth_and_rls.sql`](supabase/migrations/20261015223000_secure_auth_and_rls.sql)
-4. [`20261015233000_least_privilege_table_grants.sql`](supabase/migrations/20261015233000_least_privilege_table_grants.sql)
-5. [`20261016001000_attendance_records.sql`](supabase/migrations/20261016001000_attendance_records.sql)
-6. [`20261016180000_devices_and_heartbeat.sql`](supabase/migrations/20261016180000_devices_and_heartbeat.sql)
-7. [`20261016190000_remote_fingerprint_enrollment.sql`](supabase/migrations/20261016190000_remote_fingerprint_enrollment.sql)
-
-The standalone baseline creates the original tables; the timestamped migrations extend/harden them. Running migrations alone on an empty database is insufficient. For an existing project, inspect its applied schema before changing it. This review does not apply hosted migrations.
-
-Verify these tables exist: `classes`, `people`, `teacher_classes`, `fingerprint_mappings`, `user_roles`, `attendance_records`, `attendance_record_audit`, `devices`, and `device_commands`. RLS must remain enabled; anonymous clients have no table access. The teacher-registration and enrollment-command RPCs are administrator-only. Fingerprint mappings and device secret hashes are inaccessible to the browser.
-
-### Provision the first administrator
-
-1. Open Authentication → Users → Add user and create your administrator email/password account. Confirm the account using the dashboard option or email flow.
-2. Copy its Auth user UUID.
-3. As the project owner in SQL Editor, replace the placeholder and run:
-
-```sql
-insert into public.user_roles (user_id, role)
-values ('AUTH_USER_UUID', 'administrator');
-```
-
-There is no public sign-up or automatic admin creation. A signed-in user without a role sees an account provisioning message.
-
-### Provision a teacher
-
-1. Sign in as the administrator, create a class, and register a teacher with assigned classes.
-2. Create that teacher's Auth account in the dashboard.
-3. Find the teacher's full `people.id` UUID in Table Editor, then link it:
-
-```sql
-insert into public.user_roles (user_id, role, person_id)
-values ('TEACHER_AUTH_UUID', 'teacher', 'TEACHER_PERSON_UUID');
-```
-
-Registering a teacher in the ERP creates a person and assignments; it does not create an Auth login. Never put administrator credentials in firmware.
-
-### Provision the physical terminal
-
-Generate a long random secret locally and retain it only in the terminal's
-ignored `firmware/campusid-terminal/secrets.h` file. Store only its SHA-256
-hash in the `devices` table:
-
-```bash
-openssl rand -hex 32
-printf '%s' 'PASTE_DEVICE_SECRET_HERE' | shasum -a 256
-```
-
-As the project owner in SQL Editor, replace the generated values and run:
-
-```sql
-insert into public.devices (
-  device_code, display_name, secret_hash
-)
-values (
-  'campusid-terminal-01',
-  'CampusID Terminal 01',
-  'SHA256_HASH_OF_DEVICE_SECRET'
-);
-```
-
-The device heartbeat function must be deployed with JWT verification disabled
-at the gateway because it authenticates with the device-specific header:
-
-```bash
-supabase functions deploy device-heartbeat --no-verify-jwt --project-ref YOUR_PROJECT_REF
-```
-
-Deploy the device command function with the same gateway setting:
-
-```bash
-supabase functions deploy device-command --no-verify-jwt --project-ref YOUR_PROJECT_REF
-```
-
-The command function uses the same device-secret header. It polls and claims
-one `ENROLL_FINGERPRINT` command at a time, then acknowledges the sensor result.
-The terminal stores only the fingerprint template; raw images never leave the
-R307S sensor. Add the command URL from
-[`secrets.example.h`](firmware/campusid-terminal/secrets.example.h) to the
-ignored local `secrets.h`.
-
-Set the function's standard `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` secrets through the hosted Supabase function
-environment. Never place the service-role key in firmware or browser
-environment variables.
-
-## 4. Start development
-
-```bash
+```sh
 npm run dev
 ```
 
-Open the URL printed by Vite, usually `http://localhost:5173`. Sign in with the provisioned account. Then:
+Open the printed local URL, normally <http://localhost:5173>. Useful validation commands:
 
-1. Create a class and section.
-2. Register students with unique roll numbers and assign the class.
-3. Register a teacher and assign classes; provision their Auth account as above.
-4. Open Attendance, choose a class and date, and start the session.
-5. Mark present, late, excused, or absent. Use the unmarked filter to finish the roster.
-6. Reopen the same class/date to inspect saved records. Refresh the roster to see changes from another browser.
-
-Attendance dates use the browser's local calendar. Sessions are in-memory workspace views, not persistent lesson entities. There is one record per student/class/day. Navigating between sections keeps the session; reloading or signing out closes it. Confirmed database records persist. A timeout is reported as unconfirmed until the server state can be read.
-
-## 5. Checks and production preview
-
-```bash
-npm run check
-npm run preview
+```sh
+npm test
+npm run build
 ```
 
-`check` runs TypeScript, unit tests, formatting verification, and the production build. Preview serves the generated `dist` output; it is not a production backend. For hosting, build with the target project's public environment values and deploy `dist` to a static host over HTTPS.
+### 4. Supabase CLI
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Vite development server |
-| `npm test` | Validation, configuration, and attendance service tests |
-| `npm run typecheck` | TypeScript project checks |
-| `npm run format` | Format frontend source, package metadata, and HTML |
-| `npm run format:check` | Check formatting without modifying files |
-| `npm run build` | Typecheck and create production assets |
-| `npm run preview` | Inspect the built app locally |
+Install the Supabase CLI using the supported installation method for your OS. Then verify and authenticate it:
 
-### Database verification
+```sh
+supabase --version
+supabase login
+supabase link --project-ref pxophxwlxaqiqfxssoqg
+supabase migration list --linked
+```
 
-Create a **disposable** Supabase project and apply the same baseline and migration sequence. Paste each test into its SQL Editor:
+If you use an npm-invoked CLI instead of a system command, check it with `npx supabase --version` and prefix subsequent CLI commands with `npx`.
 
-1. [`isolated-admin-workflow.sql`](supabase/test/isolated-admin-workflow.sql)
-2. [`security-rls-workflow.sql`](supabase/test/security-rls-workflow.sql)
-3. [`attendance-workflow.sql`](supabase/test/attendance-workflow.sql)
+The production project is **erp-fingerprint** (`pxophxwlxaqiqfxssoqg`). Confirm the linked project before running administrative commands. Do not apply migrations or deploy functions unless you are intentionally working on backend changes and have reviewed the target project.
 
-The scripts create temporary Auth/database fixtures inside transactions and end in `ROLLBACK`. If an editor session stops mid-test, run `ROLLBACK;` in that session. SQL Editor does not support psql's `\i` file command; paste the actual contents. See the test README for privileged-session requirements and catalog checks. Unit tests and browser mocks do not establish that your hosted RLS policies are deployed correctly.
+```sh
+supabase db push --linked
+supabase functions deploy <function-name> --project-ref pxophxwlxaqiqfxssoqg
+```
 
-## 6. Firmware development
+This repository currently has no `supabase/config.toml`; the migration command is shown for intentional backend work, not normal onboarding. If the CLI requires local Supabase project configuration, stop and review that setup before creating/configuring files or applying database changes.
 
-1. Install Arduino IDE and Espressif's **esp32** board package through Boards Manager.
-2. Select **ESP32 Dev Module** and the board's USB port.
-3. Install **Adafruit GFX Library**, **Adafruit ILI9341**, and **Adafruit Fingerprint Sensor Library**, including their Library Manager dependencies.
-4. Open [`campusid-terminal.ino`](firmware/campusid-terminal/campusid-terminal.ino); keep all companion files in the same sketch directory.
-5. For Milestone 2, copy [`secrets.example.h`](firmware/campusid-terminal/secrets.example.h) to the ignored `secrets.h` and fill in the Wi-Fi credentials, HTTPS heartbeat URL, device secret, and the endpoint CA certificate locally. Verify/compile first. Open Serial Monitor at **115200 baud** after a verified upload; sensor UART runs at **57600 baud**.
+Device-authenticated functions use the gateway setting shown in the existing project setup, for example:
 
-**Resolve the display wiring discrepancy before uploading the combined firmware.** The reported working TFT uses CS 5 / DC 2 / RESET 4 / MOSI 23 / CLK 18 / MISO 19 with the explicit six-argument constructor. The combined terminal still uses CS 27 / DC 4 / RESET -1 and a hardware-SPI constructor. GPIO2 is currently assigned to its buzzer. Do not merge those configurations without resolving that conflict.
+```sh
+supabase functions deploy device-heartbeat --no-verify-jwt --project-ref pxophxwlxaqiqfxssoqg
+supabase functions deploy device-command --no-verify-jwt --project-ref pxophxwlxaqiqfxssoqg
+```
 
-A new standalone [`tft-regression.ino`](firmware/tft-regression/tft-regression.ino) preserves the reported constructor/pins and draws borders, colors, and bottom text for inspection. It is a reconstructed regression sketch, not the original tested demo, and has not been physically verified here. Refer to the [hardware plan](docs/EXPO_ROADMAP.md) for power, keypad, and pin constraints.
+Never put the function service-role key in frontend or firmware configuration. There is no `supabase/config.toml` in this repository.
 
-## Troubleshooting
+### 5. Arduino IDE / ESP32 firmware
 
-| Symptom | Check |
-| --- | --- |
-| Blank/failed setup | Valid public project URL/key, supported Node, restart Vite |
-| Invalid login | Correct Auth account, confirmed email, correct project |
-| Account not provisioned | Matching `user_roles.user_id`; teacher must link to `people.id` |
-| Empty teacher roster | Teacher role, active person, class assignments, deployed RLS |
-| Missing function or attendance table | Apply the complete development database sequence |
-| Save unconfirmed | Refresh after reconnect; do not assume a timeout means a failed write |
-| TFT blank or cropped | Compare constructor/pins and verify portrait rotation; run standalone regression |
-| Random keypad inputs | GPIO34/35 need external 10 kΩ pull-ups, absent from the confirmed inventory |
-| Fingerprint never matches | The current firmware recognizes existing templates; it does not enroll new fingers |
+1. Install Arduino IDE 2.x.
+2. In Boards Manager, install Espressif ESP32 board support.
+3. Select **ESP32 Dev Module** and the correct serial port. Windows ports may appear as `COM3` or `COM4`; macOS ports commonly appear as `/dev/cu.usbserial-*` or `/dev/cu.SLAB_USBtoUART`. Names vary by adapter and machine.
+4. In Library Manager, install:
+   - Adafruit GFX Library
+   - Adafruit ILI9341
+   - Adafruit Fingerprint Sensor Library
+5. Open this exact sketch: [`firmware/campusid-terminal/campusid-terminal.ino`](./firmware/campusid-terminal/campusid-terminal.ino). Keep its companion firmware files in the same directory.
+6. Create the ignored local `secrets.h` as described below.
+7. Verify/compile, check the hardware connections, then upload. Open Serial Monitor at **115200 baud**.
 
-## Deliberate prototype limits
+### 6. Local firmware secrets
 
-No cloud enrollment, trusted device ingestion, Wi-Fi/offline event queue, live terminal telemetry, timetable, payroll, fees, or mobile app. The strongest next milestone is a single demonstrable path: **remote enrollment → authorized class → fingerprint scan → dashboard result → Wi-Fi failure and safe replay**. See the roadmap for acceptance criteria and feasible hardware.
+Copy the tracked placeholder template next to the sketch.
+
+**Windows PowerShell**
+
+```powershell
+Copy-Item firmware/campusid-terminal/secrets.example.h firmware/campusid-terminal/secrets.h
+```
+
+**macOS / Linux**
+
+```sh
+cp firmware/campusid-terminal/secrets.example.h firmware/campusid-terminal/secrets.h
+```
+
+Edit the local `secrets.h` with the Wi-Fi SSID/password, the heartbeat and command URLs, the device secret, and the trusted Supabase root CA certificate. Firmware expects these identifiers: `CAMPUSID_WIFI_SSID`, `CAMPUSID_WIFI_PASSWORD`, `CAMPUSID_HEARTBEAT_URL`, `CAMPUSID_COMMAND_URL`, `CAMPUSID_DEVICE_SECRET`, and `CAMPUSID_SUPABASE_ROOT_CA`.
+
+`secrets.h` is ignored by Git. Never commit or print it, Wi-Fi credentials, device secrets, or service-role keys. The backend stores only the device secret hash. Keep certificate validation enabled; never use `WiFiClientSecure::setInsecure()`.
+
+### 7. Verified hardware wiring
+
+These values match the current firmware configuration. Verify the actual module labels, voltage/current requirements, and common ground before connecting power.
+
+| Hardware signal | ESP32 configuration |
+| --- | ---: |
+| R307S TX → ESP32 UART2 RX | GPIO16 |
+| ESP32 UART2 TX → R307S RX | GPIO17 |
+| R307S UART | 57600 baud, 8N1 |
+| TFT CS | GPIO5 |
+| TFT DC | GPIO2 |
+| TFT RESET | GPIO4 |
+| TFT MOSI | GPIO23 |
+| TFT SCK | GPIO18 |
+| TFT MISO | GPIO19 |
+| TFT rotation | 2 |
+
+The selected display controller is ILI9341. GPIO2 is the TFT DC pin, so the buzzer is disabled. The keypad is also disabled in the current baseline. Do not reuse GPIO2 for the buzzer.
+
+The sensor reports its template capacity at runtime; the current tested R307S reported 1000 templates. Do not assume or hardcode a marketing capacity.
+
+#### Destructive sensor maintenance
+
+The Serial maintenance command `RESET FINGERPRINT DATABASE` clears all templates stored on the R307S. It is **not** run automatically at boot. Do not send it during ordinary setup; use it only when deliberately resetting the physical sensor and after confirming that clearing its templates is intended.
+
+### 8. Troubleshooting
+
+- **Vite setup/configuration error:** check both `VITE_*` entries in `.env.local`, confirm they belong to the intended Supabase project, and restart Vite.
+- **Login/account not provisioned:** verify the Auth account and role/person linkage in the intended project.
+- **CLI is linked to the wrong project:** inspect the linked project before any writes; re-link only to the intended project.
+- **No network configuration in firmware:** confirm the sketch path and that ignored `secrets.h` is beside the sketch with all six required macro names. Do not print their values.
+- **Wi-Fi or heartbeat failure:** check local Wi-Fi values, endpoint URLs, CA certificate, and the provisioned device secret/hash pair. Do not weaken TLS validation.
+- **Fingerprint sensor not ready:** verify sensor power/common ground, crossed UART direction (sensor TX to GPIO16; sensor RX to GPIO17), and 57600 baud.
+- **TFT blank or wrong orientation:** verify ILI9341 selection, the pin map above, the module's labeled pins and power requirements, and rotation 2. Do not assume the display connector pin order.
+- **Arduino upload fails:** check ESP32 board support, **ESP32 Dev Module**, the selected serial port, USB cable, and required libraries.
+
+## New Machine Checklist
+
+- [ ] Install Git, Node.js/npm, Arduino IDE 2.x, and ESP32 board support as needed.
+- [ ] Clone the repo, run `git fetch origin`, and switch to `expo-v1`.
+- [ ] Run `npm install`.
+- [ ] Copy `.env.example` to `.env.local` and enter the browser-safe Supabase URL/key.
+- [ ] Run `npm run dev` and confirm the ERP opens.
+- [ ] Install/authenticate Supabase CLI and link the intended project when cloud administration is needed.
+- [ ] Install the three listed Arduino libraries.
+- [ ] Copy `secrets.example.h` to `secrets.h` and fill local Wi-Fi/device/endpoint/CA configuration.
+- [ ] Verify wiring, select **ESP32 Dev Module** and the correct serial port, then use Verify and Upload.
+- [ ] Open Serial Monitor at 115200 baud; confirm the sensor is ready, heartbeat returns HTTP 200, and the ERP reports the terminal online.
+
+For expanded setup notes and troubleshooting, see [SETUP.md](./SETUP.md). For current development status, see [docs/DEVELOPMENT_CHECKPOINT.md](./docs/DEVELOPMENT_CHECKPOINT.md).
+
+## More documentation
+
+- [Firmware wiring and implementation notes](./firmware/campusid-terminal/README.md)
+- [Implementation and design](./docs/IMPLEMENTATION.md)
+- [Hardware feasibility and expo roadmap](./docs/EXPO_ROADMAP.md)
+- [Disposable database tests](./supabase/test/README.md)
+- [Earlier engineering/security history](./docs/ENGINEERING_PLAN.md)
