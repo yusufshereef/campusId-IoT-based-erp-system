@@ -250,8 +250,15 @@ void setup() {
 
 void loop() {
   bool redraw = false;
-  fingerprint.update();
   network.update(fingerprint.state() == FingerprintState::Ready);
+  const uint32_t fingerprint_started = millis();
+  fingerprint.update();
+  const uint32_t fingerprint_duration = millis() - fingerprint_started;
+  if (fingerprint_duration >= 1000) {
+    Serial.print("Fingerprint update duration: ");
+    Serial.print(fingerprint_duration);
+    Serial.println(" ms");
+  }
   if (network.state() != last_network_state) {
     last_network_state = network.state();
     redraw = true;
@@ -294,7 +301,17 @@ void loop() {
   }
   // Consume the new match before painting so the previous template never
   // flashes on screen. Paint once per result, including the status screen.
-  if (redraw && (screen == Screen::Home || screen == Screen::DeviceStatus)) render();
+  if (redraw && (screen == Screen::Home || screen == Screen::DeviceStatus)) {
+    const uint32_t render_started = millis();
+    render();
+    const uint32_t render_duration = millis() - render_started;
+    if (render_duration >= 1000) {
+      Serial.print("TFT render duration: ");
+      Serial.print(render_duration);
+      Serial.println(" ms");
+    }
+  }
+  network.update(fingerprint.state() == FingerprintState::Ready);
 #if ENABLE_KEYPAD
   const Key key = keypad.poll();
   if (key != Key::None) {

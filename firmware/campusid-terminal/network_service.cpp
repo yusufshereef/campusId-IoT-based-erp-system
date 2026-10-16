@@ -95,9 +95,16 @@ bool NetworkService::sendHeartbeat(bool sensor_ready,
   payload += ",\"pending_event_count\":";
   payload += String(pending_event_count);
   payload += "}";
+  const uint32_t heartbeat_started = millis();
   const int status = request.POST(payload);
   const String response_body = request.getString();
+  const uint32_t heartbeat_duration = millis() - heartbeat_started;
   request.end();
+  Serial.print("Heartbeat: HTTP ");
+  Serial.print(status);
+  Serial.print(" (");
+  Serial.print(heartbeat_duration);
+  Serial.println(" ms)");
   if (status < 200 || status >= 300) {
     Serial.print("Heartbeat failed: HTTP ");
     Serial.println(status);
