@@ -8,7 +8,9 @@
 
 #if __has_include("secrets.h")
 #include "secrets.h"
+#define CAMPUSID_SECRETS_HEADER_FOUND 1
 #else
+#define CAMPUSID_SECRETS_HEADER_FOUND 0
 #define CAMPUSID_WIFI_SSID ""
 #define CAMPUSID_WIFI_PASSWORD ""
 #define CAMPUSID_HEARTBEAT_URL ""
@@ -49,7 +51,16 @@ void logWifiStatus(int status) {
 }
 
 void NetworkService::begin() {
-  if (!configured()) {
+  Serial.println("Network service begin");
+#if CAMPUSID_SECRETS_HEADER_FOUND
+  Serial.println("Network config: present");
+#else
+  Serial.println("Network config: missing");
+#endif
+  const bool network_configured = configured();
+  Serial.print("Network configured(): ");
+  Serial.println(network_configured ? "true" : "false");
+  if (!network_configured) {
     setState(NetworkState::Disabled);
     return;
   }
@@ -131,6 +142,7 @@ void NetworkService::connect() {
     WiFi.disconnect();
   }
   logWifiStatus(WiFi.status());
+  Serial.println("WiFi.begin() called");
   WiFi.begin(CAMPUSID_WIFI_SSID, CAMPUSID_WIFI_PASSWORD);
   wifi_begin_at_ = now;
   wifi_associated_ = false;
