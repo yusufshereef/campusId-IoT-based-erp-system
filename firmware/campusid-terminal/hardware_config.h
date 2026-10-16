@@ -12,6 +12,7 @@
 // Optional alternate adapter for a different, verified module only.
 #define CAMPUSID_DISPLAY_ST7789 0
 #define ENABLE_BUZZER 0
+#define ENABLE_KEYPAD 0
 
 #if CAMPUSID_DISPLAY_ILI9341 == CAMPUSID_DISPLAY_ST7789
 #error "Select exactly one display controller"

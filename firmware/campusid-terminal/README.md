@@ -40,6 +40,8 @@ phases.
 - The buzzer is disabled for this hardware baseline because GPIO2 is the TFT
   data/command pin. It remains structurally available for a future pin
   assignment.
+- Keypad input is disabled for this hardware baseline. Its module remains in
+  the sketch for future use, but it does not configure or poll keypad GPIOs.
 
 The selected firmware requires Adafruit GFX Library and Adafruit ILI9341.
 Adafruit ST7789 and ST7735 Library is needed only if the alternate ST7789
@@ -75,20 +77,17 @@ configuration is deliberately selected for another module.
 | R307S RX | 16 | Sensor TX -> ESP32 RX2 |
 | R307S TX | 17 | Sensor RX -> ESP32 TX2 |
 | Buzzer | 2 | Disabled; conflicts with TFT DC |
-| Active buzzer | 2 | Use a transistor/driver if current exceeds GPIO limits |
 | R307S sensor TX -> ESP32 RX | 16 | UART2 RX, 57600 8N1 |
 | ESP32 TX -> R307S sensor RX | 17 | UART2 TX, 57600 8N1 |
 
-GPIO34 and GPIO35 are input-only and have no internal pull-up resistors.
-Provide an external 10K pull-up from each of those keypad columns to 3.3 V.
-The keypad must not apply 5 V to ESP32 GPIOs.
+GPIO34 and GPIO35 are input-only and have no internal pull-up resistors. The
+keypad is disabled in this baseline, so its GPIOs are not configured or
+polled.
 
-GPIO2 is an ESP32 boot-strapping pin. The firmware initializes it LOW before
-use, but the buzzer circuit must not force it HIGH during reset or flashing.
-If the physical buzzer circuit cannot satisfy that requirement, move the
-buzzer to another verified-safe GPIO and update `hardware_config.h`.
+GPIO2 is reserved for the verified TFT DC connection in this baseline. Do not
+use it for the buzzer.
 
-GPIO4 is also used by the TFT DC line and must not be reused. Do not power the
+GPIO4 is used by the TFT RESET line and must not be reused. Do not power the
 TFT, backlight, sensor, LEDs, or buzzer from a GPIO output. Use a suitable
 regulated supply, common ground, current limiting, and a transistor/driver
 where the load requires it. Verify the R307S voltage, current, and UART-level
@@ -239,11 +238,11 @@ After compiling and uploading:
    each connected signal matches its verified label; if the screen stays blank
    or colors/rotation are wrong, stop and recheck wiring and power.
 3. Confirm the boot screen is readable and does not flicker.
-4. Press the keypad keys and verify menu navigation.
-5. Open Hardware Test and verify the pressed-key state changes to `PASS`.
-6. Confirm green, red, and buzzer patterns are short and non-blocking.
-7. Confirm reset and upload still work with the buzzer and LEDs attached.
-8. Confirm no component becomes hot and measure supply voltage under load.
-9. Do not interpret local recognition as attendance. R307S enrollment, student
+4. Confirm the keypad remains inactive and produces no GPIO pull-up warnings.
+5. Confirm green and red patterns are short and non-blocking; the buzzer must
+   remain inactive.
+6. Confirm reset and upload still work with the LEDs attached.
+7. Confirm no component becomes hot and measure supply voltage under load.
+8. Do not interpret local recognition as attendance. R307S enrollment, student
    mapping, device authentication, session authorization, server writes, and
    offline synchronization remain separate work.

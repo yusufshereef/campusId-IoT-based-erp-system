@@ -20,6 +20,12 @@ bool has_fingerprint_diagnostic = false;
 constexpr uint32_t FingerprintDiagnosticIntervalMs = 1000;
 FingerprintMatch last_match;
 bool has_last_match = false;
+bool has_rendered = false;
+Screen rendered_screen = Screen::Home;
+FingerprintState rendered_fingerprint_state = FingerprintState::Initializing;
+bool rendered_has_match = false;
+uint16_t rendered_template_id = 0;
+uint16_t rendered_confidence = 0;
 
 const char* menu_label(uint8_t index) {
   switch (index) {
@@ -143,13 +149,29 @@ void draw_about() {
   display.text("backend workflow.", 15, 186, 1, CampusIdDisplay::Muted);
 }
 
-void render() {
+void render(bool force = false) {
   if (!display.available()) return;
+  const FingerprintState fingerprint_state = fingerprint.state();
+  const bool match_changed =
+      has_last_match != rendered_has_match ||
+      (has_last_match &&
+       (last_match.template_id != rendered_template_id ||
+        last_match.confidence != rendered_confidence));
+  if (!force && has_rendered && screen == rendered_screen &&
+      fingerprint_state == rendered_fingerprint_state && !match_changed) {
+    return;
+  }
   if (screen == Screen::Home) draw_home();
   else if (screen == Screen::Menu) draw_menu();
   else if (screen == Screen::HardwareTest) draw_hardware_test();
   else if (screen == Screen::DeviceStatus) draw_status();
   else draw_about();
+  has_rendered = true;
+  rendered_screen = screen;
+  rendered_fingerprint_state = fingerprint_state;
+  rendered_has_match = has_last_match;
+  rendered_template_id = last_match.template_id;
+  rendered_confidence = last_match.confidence;
 }
 
 void select_menu() {
@@ -174,7 +196,7 @@ void handle_key(Key key) {
              screen == Screen::About) {
     if (key == Key::Back) screen = Screen::Menu;
   }
-  render();
+  render(true);
 }
 
 void setup() {
@@ -195,7 +217,7 @@ void setup() {
     display.header("CAMPUSID", "TERMINAL BOOT");
     boot_line("Firmware foundation", 65);
     boot_line(CAMPUSID_FIRMWARE_VERSION, 85);
-    boot_line("Initializing keypad...", 115);
+    boot_line("Keypad disabled for baseline", 115);
     boot_line("Initializing indicators...", 135);
     boot_line("R307S state is on Serial", 155);
     delay(350);
@@ -205,9 +227,11 @@ void setup() {
   fingerprint.begin();
   Serial.print("Fingerprint sensor: ");
   Serial.println(fingerprintStateName(fingerprint.state()));
+#if ENABLE_KEYPAD
   keypad.begin();
+#endif
   feedback.begin();
-  render();
+  render(true);
 }
 
 void loop() {
@@ -252,6 +276,7 @@ void loop() {
   // Consume the new match before painting so the previous template never
   // flashes on screen. Paint once per result, including the status screen.
   if (redraw && (screen == Screen::Home || screen == Screen::DeviceStatus)) render();
+#if ENABLE_KEYPAD
   const Key key = keypad.poll();
   if (key != Key::None) {
     if (screen == Screen::HardwareTest && key != Key::Back) {
@@ -259,5 +284,6 @@ void loop() {
     }
     handle_key(key);
   }
+#endif
   feedback.update();
 }
