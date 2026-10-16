@@ -271,7 +271,10 @@ void setup() {
   keypad.begin();
 #endif
   feedback.begin();
+  Serial.println("BUILD MARKER: network-debug-v1");
+  Serial.println("ABOUT TO CALL network.begin()");
   network.begin();
+  Serial.println("RETURNED FROM network.begin()");
   render(true);
 }
 
