@@ -23,7 +23,7 @@ import {
 } from "./lib/admin";
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
 import { Overview } from "./components/Overview";
-import { deviceStatus } from "./lib/device_status";
+import { DEVICE_REFRESH_INTERVAL_MS, deviceStatus } from "./lib/device_status";
 import type { CampusClass, Device, Person, Tab, Notice } from "./lib/types";
 
 export default function App() {
@@ -241,7 +241,7 @@ export default function App() {
     if (!session || !supabase) return;
     const timer = window.setInterval(() => {
       void refresh();
-    }, 15000);
+    }, DEVICE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [session?.user.id]);
   useEffect(() => {

@@ -18,7 +18,7 @@ class NetworkService {
 
  private:
   static constexpr uint32_t ReconnectIntervalMs = 10000;
-  static constexpr uint32_t HeartbeatIntervalMs = 15000;
+  static constexpr uint32_t HeartbeatIntervalMs = 5000;
   static constexpr uint32_t HttpTimeoutMs = 3000;
 
   NetworkState state_ = NetworkState::Disabled;

@@ -1,6 +1,7 @@
 import type { Device } from "./types";
 
-export const DEVICE_OFFLINE_THRESHOLD_MS = 45_000;
+export const DEVICE_OFFLINE_THRESHOLD_MS = 15_000;
+export const DEVICE_REFRESH_INTERVAL_MS = 15_000;
 export type DeviceReadiness = "not_integrated" | "connected" | "offline";
 
 export function isDeviceOnline(

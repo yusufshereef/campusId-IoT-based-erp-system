@@ -10,14 +10,14 @@ describe("device status", () => {
   const now = Date.parse("2026-10-16T12:00:00.000Z");
 
   it("treats a recent heartbeat as online", () => {
-    expect(isDeviceOnline("2026-10-16T11:59:30.000Z", now)).toBe(true);
+    expect(isDeviceOnline("2026-10-16T11:59:50.000Z", now)).toBe(true);
     expect(
       deviceStatus(
         {
           id: "1",
           device_code: "campusid-terminal-01",
           display_name: "CampusID Terminal 01",
-          last_seen_at: "2026-10-16T11:59:30.000Z",
+          last_seen_at: "2026-10-16T11:59:50.000Z",
           firmware_version: "0.1.0",
           sensor_ready: true,
           pending_event_count: 0,
@@ -37,7 +37,7 @@ describe("device status", () => {
       id: "1",
       device_code: "campusid-terminal-01",
       display_name: "CampusID Terminal 01",
-      last_seen_at: "2026-10-16T11:59:30.000Z",
+      last_seen_at: "2026-10-16T11:59:50.000Z",
       firmware_version: "0.1.0",
       sensor_ready: true,
       pending_event_count: 0,
@@ -45,7 +45,7 @@ describe("device status", () => {
     expect(deviceReadiness(device, now)).toBe("connected");
     expect(
       deviceReadiness(
-        { ...device, last_seen_at: "2026-10-16T11:59:14.000Z" },
+        { ...device, last_seen_at: "2026-10-16T11:59:44.000Z" },
         now,
       ),
     ).toBe("offline");
