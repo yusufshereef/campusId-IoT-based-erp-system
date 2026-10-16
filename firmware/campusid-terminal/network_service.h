@@ -18,7 +18,11 @@ enum class NetworkState {
 class NetworkService {
  public:
   void begin();
-  void update(bool sensor_ready, uint16_t pending_event_count = 0);
+  void updateConnection();
+  bool heartbeatDue() const;
+  void sendHeartbeat(bool sensor_ready, uint16_t pending_event_count = 0);
+  bool commandPollDue() const;
+  void pollCommand();
   NetworkState state() const { return state_; }
   bool online() const { return state_ == NetworkState::Online; }
   bool takeEnrollmentCommand(EnrollmentCommand& command);
@@ -28,8 +32,8 @@ class NetworkService {
 
  private:
   static constexpr uint32_t ReconnectIntervalMs = 10000;
-  static constexpr uint32_t HeartbeatIntervalMs = 5000;
-  static constexpr uint32_t CommandPollIntervalMs = 1000;
+  static constexpr uint32_t HeartbeatIntervalMs = 10000;
+  static constexpr uint32_t CommandPollIntervalMs = 3000;
   static constexpr uint32_t HttpTimeoutMs = 3000;
 
   NetworkState state_ = NetworkState::Disabled;
@@ -45,7 +49,7 @@ class NetworkService {
   bool configured() const;
   void setState(NetworkState next);
   void connect();
-  bool sendHeartbeat(bool sensor_ready, uint16_t pending_event_count);
+  bool sendHeartbeatRequest(bool sensor_ready, uint16_t pending_event_count);
   void pollCommands();
   bool sendCommandRequest(const String& payload, String& response);
 };

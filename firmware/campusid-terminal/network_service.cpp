@@ -58,7 +58,7 @@ void NetworkService::begin() {
   connect();
 }
 
-void NetworkService::update(bool sensor_ready, uint16_t pending_event_count) {
+void NetworkService::updateConnection() {
   if (!configured()) return;
 
   const int wifi_status = WiFi.status();
@@ -82,19 +82,29 @@ void NetworkService::update(bool sensor_ready, uint16_t pending_event_count) {
     Serial.println(" ms");
   }
 
-  if (static_cast<int32_t>(millis() - next_heartbeat_) >= 0) {
-    Serial.println("Heartbeat starting");
-    const bool heartbeat_succeeded =
-        sendHeartbeat(sensor_ready, pending_event_count);
-    setState(heartbeat_succeeded ? NetworkState::Online
-                                 : NetworkState::Disconnected);
-    next_heartbeat_ = millis() + HeartbeatIntervalMs;
-  }
-  if (hasValue(CAMPUSID_COMMAND_URL) &&
-      static_cast<int32_t>(millis() - next_command_poll_) >= 0) {
-    pollCommands();
-    next_command_poll_ = millis() + CommandPollIntervalMs;
-  }
+}
+
+bool NetworkService::heartbeatDue() const {
+  return wifi_associated_ &&
+         static_cast<int32_t>(millis() - next_heartbeat_) >= 0;
+}
+
+void NetworkService::sendHeartbeat(bool sensor_ready,
+                                   uint16_t pending_event_count) {
+  Serial.println("Heartbeat starting");
+  const bool succeeded = sendHeartbeatRequest(sensor_ready, pending_event_count);
+  setState(succeeded ? NetworkState::Online : NetworkState::Disconnected);
+  next_heartbeat_ = millis() + HeartbeatIntervalMs;
+}
+
+bool NetworkService::commandPollDue() const {
+  return wifi_associated_ && hasValue(CAMPUSID_COMMAND_URL) &&
+         static_cast<int32_t>(millis() - next_command_poll_) >= 0;
+}
+
+void NetworkService::pollCommand() {
+  pollCommands();
+  next_command_poll_ = millis() + CommandPollIntervalMs;
 }
 
 bool NetworkService::configured() const {
@@ -128,8 +138,8 @@ void NetworkService::connect() {
   setState(NetworkState::Connecting);
 }
 
-bool NetworkService::sendHeartbeat(bool sensor_ready,
-                                   uint16_t pending_event_count) {
+bool NetworkService::sendHeartbeatRequest(bool sensor_ready,
+                                         uint16_t pending_event_count) {
   WiFiClientSecure client;
   client.setCACert(CAMPUSID_SUPABASE_ROOT_CA);
   HTTPClient request;

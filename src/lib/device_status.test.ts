@@ -28,7 +28,8 @@ describe("device status", () => {
   });
 
   it("treats a stale or missing heartbeat as offline", () => {
-    expect(isDeviceOnline("2026-10-16T11:59:14.000Z", now)).toBe(false);
+    expect(isDeviceOnline("2026-10-16T11:59:35.000Z", now)).toBe(true);
+    expect(isDeviceOnline("2026-10-16T11:59:34.000Z", now)).toBe(false);
     expect(isDeviceOnline(null, now)).toBe(false);
   });
 
@@ -45,7 +46,7 @@ describe("device status", () => {
     expect(deviceReadiness(device, now)).toBe("connected");
     expect(
       deviceReadiness(
-        { ...device, last_seen_at: "2026-10-16T11:59:44.000Z" },
+        { ...device, last_seen_at: "2026-10-16T11:59:34.000Z" },
         now,
       ),
     ).toBe("offline");

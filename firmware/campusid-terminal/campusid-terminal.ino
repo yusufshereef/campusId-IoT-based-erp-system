@@ -277,15 +277,6 @@ void setup() {
 
 void loop() {
   bool redraw = false;
-  network.update(fingerprint.state() == FingerprintState::Ready);
-  EnrollmentCommand command;
-  if (!fingerprint.enrollmentActive() &&
-      fingerprint.enrollmentState() == EnrollmentState::Idle &&
-      network.takeEnrollmentCommand(command)) {
-    active_enrollment_command_id = command.id;
-    fingerprint.beginEnrollment(command.display_name);
-    redraw = true;
-  }
   const uint32_t fingerprint_started = millis();
   fingerprint.update();
   const uint32_t fingerprint_duration = millis() - fingerprint_started;
@@ -340,6 +331,7 @@ void loop() {
     redraw = true;
   }
   bool enrollment_success;
+  bool completed_enrollment_request = false;
   uint16_t enrollment_template_id;
   String enrollment_error;
   if (fingerprint.takeEnrollmentResult(enrollment_success,
@@ -348,6 +340,7 @@ void loop() {
     network.completeEnrollment(active_enrollment_command_id,
                                enrollment_success, enrollment_template_id,
                                enrollment_error.c_str());
+    completed_enrollment_request = true;
     if (enrollment_success) {
       Serial.print("Enrollment complete: template_id=");
       Serial.println(enrollment_template_id);
@@ -366,7 +359,27 @@ void loop() {
       Serial.println(" ms");
     }
   }
-  network.update(fingerprint.state() == FingerprintState::Ready);
+  EnrollmentCommand command;
+  if (!fingerprint.enrollmentActive() &&
+      fingerprint.enrollmentState() == EnrollmentState::Idle &&
+      network.takeEnrollmentCommand(command)) {
+    active_enrollment_command_id = command.id;
+    fingerprint.beginEnrollment(command.display_name);
+    redraw = true;
+  }
+  // Service connectivity and at most one cloud request after biometric work.
+  // Enrollment acknowledgements already used this turn's HTTP slot.
+  network.updateConnection();
+  if (!completed_enrollment_request) {
+    if (network.heartbeatDue()) {
+      network.sendHeartbeat(fingerprint.state() == FingerprintState::Ready);
+    } else if (!fingerprint.enrollmentActive() &&
+               fingerprint.enrollmentState() == EnrollmentState::Idle &&
+               fingerprint.state() == FingerprintState::Ready &&
+               network.commandPollDue()) {
+      network.pollCommand();
+    }
+  }
 #if ENABLE_KEYPAD
   const Key key = keypad.poll();
   if (key != Key::None) {
