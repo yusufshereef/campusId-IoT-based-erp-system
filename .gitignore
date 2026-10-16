@@ -2,6 +2,10 @@ node_modules
 dist
 .env.local
 firmware/campusid-terminal/secrets.h
+*.tsbuildinfo
+firmware/campusid-terminal/tests/*.exe
+firmware/campusid-terminal/tests/*.out
+*probe*.sql
 
 # Local Supabase CLI state
 supabase/.temp/
