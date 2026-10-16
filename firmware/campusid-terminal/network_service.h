@@ -28,7 +28,7 @@ class NetworkService {
   bool configured() const;
   void setState(NetworkState next);
   void connect();
-  void sendHeartbeat(bool sensor_ready, uint16_t pending_event_count);
+  bool sendHeartbeat(bool sensor_ready, uint16_t pending_event_count);
 };
 
 const char* networkStateName(NetworkState state);

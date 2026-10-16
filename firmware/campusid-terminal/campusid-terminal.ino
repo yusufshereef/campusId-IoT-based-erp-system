@@ -25,6 +25,7 @@ bool has_last_match = false;
 bool has_rendered = false;
 Screen rendered_screen = Screen::Home;
 FingerprintState rendered_fingerprint_state = FingerprintState::Initializing;
+NetworkState rendered_network_state = NetworkState::Disabled;
 NetworkState last_network_state = NetworkState::Disabled;
 bool rendered_has_match = false;
 uint16_t rendered_template_id = 0;
@@ -91,9 +92,16 @@ void draw_home() {
   }
   display.text("Local recognition only", 20, 250, 1, CampusIdDisplay::Muted);
   display.text("SELECT: terminal menu", 20, 270, 1, CampusIdDisplay::Muted);
-  display.text(network.online() ? "ONLINE" : "OFFLINE", 20, 290, 1,
-               network.online() ? CampusIdDisplay::Success
-                                : CampusIdDisplay::Muted);
+  const char* network_label = "CLOUD OFFLINE";
+  uint16_t network_color = CampusIdDisplay::Muted;
+  if (network.state() == NetworkState::Connecting) {
+    network_label = "CONNECTING";
+    network_color = CampusIdDisplay::Warning;
+  } else if (network.online()) {
+    network_label = "ONLINE";
+    network_color = CampusIdDisplay::Success;
+  }
+  display.text(network_label, 20, 290, 1, network_color);
 }
 
 void draw_menu() {
@@ -161,7 +169,8 @@ void render(bool force = false) {
        (last_match.template_id != rendered_template_id ||
         last_match.confidence != rendered_confidence));
   if (!force && has_rendered && screen == rendered_screen &&
-      fingerprint_state == rendered_fingerprint_state && !match_changed) {
+      fingerprint_state == rendered_fingerprint_state &&
+      network.state() == rendered_network_state && !match_changed) {
     return;
   }
   if (screen == Screen::Home) draw_home();
@@ -172,6 +181,7 @@ void render(bool force = false) {
   has_rendered = true;
   rendered_screen = screen;
   rendered_fingerprint_state = fingerprint_state;
+  rendered_network_state = network.state();
   rendered_has_match = has_last_match;
   rendered_template_id = last_match.template_id;
   rendered_confidence = last_match.confidence;

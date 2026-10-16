@@ -4,7 +4,7 @@
 // and module before applying power.
 
 #define CAMPUSID_FIRMWARE_VERSION "0.1.0"
-#define CAMPUSID_DEVICE_ID "CAMPUSID-TERMINAL-01"
+#define CAMPUSID_DEVICE_ID "campusid-terminal-01"
 
 // KTRON 2.8-inch 240x320 SPI non-touch module: ILI9341.
 // ILI9341 is the selected default for the ordered display.

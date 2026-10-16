@@ -41,12 +41,11 @@ void NetworkService::update(bool sensor_ready, uint16_t pending_event_count) {
     return;
   }
 
-  if (state_ != NetworkState::Online) {
-    setState(NetworkState::Online);
-    next_heartbeat_ = 0;
-  }
   if (static_cast<int32_t>(millis() - next_heartbeat_) >= 0) {
-    sendHeartbeat(sensor_ready, pending_event_count);
+    const bool heartbeat_succeeded =
+        sendHeartbeat(sensor_ready, pending_event_count);
+    setState(heartbeat_succeeded ? NetworkState::Online
+                                 : NetworkState::Disconnected);
     next_heartbeat_ = millis() + HeartbeatIntervalMs;
   }
 }
@@ -73,29 +72,42 @@ void NetworkService::connect() {
   setState(NetworkState::Connecting);
 }
 
-void NetworkService::sendHeartbeat(bool sensor_ready,
+bool NetworkService::sendHeartbeat(bool sensor_ready,
                                    uint16_t pending_event_count) {
   WiFiClientSecure client;
   client.setCACert(CAMPUSID_SUPABASE_ROOT_CA);
   HTTPClient request;
   if (!request.begin(client, CAMPUSID_HEARTBEAT_URL)) {
-    return;
+    Serial.println("Heartbeat request initialization failed");
+    return false;
   }
   request.setTimeout(HttpTimeoutMs);
   request.addHeader("Content-Type", "application/json");
   request.addHeader("X-CampusID-Device-Secret", CAMPUSID_DEVICE_SECRET);
-  const String payload =
-      "{\"device_id\":\"" CAMPUSID_DEVICE_ID
-      "\",\"firmware_version\":\"" CAMPUSID_FIRMWARE_VERSION
-      "\",\"sensor_ready\":" +
-      String(sensor_ready ? "true" : "false") +
-      ",\"pending_event_count\":" + String(pending_event_count) + "}";
+  String payload;
+  payload.reserve(128);
+  payload += "{\"device_id\":\"";
+  payload += CAMPUSID_DEVICE_ID;
+  payload += "\",\"firmware_version\":\"";
+  payload += CAMPUSID_FIRMWARE_VERSION;
+  payload += "\",\"sensor_ready\":";
+  payload += sensor_ready ? "true" : "false";
+  payload += ",\"pending_event_count\":";
+  payload += String(pending_event_count);
+  payload += "}";
   const int status = request.POST(payload);
+  const String response_body = request.getString();
   request.end();
   if (status < 200 || status >= 300) {
     Serial.print("Heartbeat failed: HTTP ");
     Serial.println(status);
+    if (response_body.length() > 0) {
+      Serial.print("Heartbeat response: ");
+      Serial.println(response_body);
+    }
+    return false;
   }
+  return true;
 }
 
 const char* networkStateName(NetworkState state) {
