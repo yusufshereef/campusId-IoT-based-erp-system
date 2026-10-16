@@ -5,6 +5,7 @@ An expo-focused IoT attendance prototype: a React + TypeScript workspace, Supaba
 **Working in source:** administrator and teacher sign-in, class/student/teacher registration, assignments, activation, search, manual attendance with corrections, terminal health, and administrator-triggered remote fingerprint enrollment. Attendance events and offline synchronization remain out of scope.
 
 - [Implementation and design](docs/IMPLEMENTATION.md)
+- [Local development setup](SETUP.md)
 - [Hardware feasibility and expo roadmap](docs/EXPO_ROADMAP.md)
 - [Firmware setup and existing wiring](firmware/campusid-terminal/README.md)
 - [Disposable database tests](supabase/test/README.md)
