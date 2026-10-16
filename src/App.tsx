@@ -24,6 +24,11 @@ import {
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
 import { Overview } from "./components/Overview";
 import { DEVICE_REFRESH_INTERVAL_MS, deviceStatus } from "./lib/device_status";
+import {
+  canRequestEnrollment,
+  enrollmentStarted,
+  indexEnrollmentStatuses,
+} from "./lib/enrollment_status";
 import type {
   CampusClass,
   Device,
@@ -55,6 +60,8 @@ export default function App() {
   const sessionRef = useRef<Session | null>(null);
   const sessionGeneration = useRef(0);
   const refreshGeneration = useRef(0);
+  const statusRefreshGeneration = useRef(0);
+  const statusRefreshPending = useRef(false);
   const mutationPending = useRef(false);
   const [classNameInput, setClassNameInput] = useState(""),
     [section, setSection] = useState("A"),
@@ -86,7 +93,7 @@ export default function App() {
       sessionRef.current?.user.id === currentSession?.user.id
     );
   }
-  async function refresh() {
+  async function refresh(silent = false) {
     if (!supabase || !session) {
       setDbConnected(false);
       if (!supabase) {
@@ -100,7 +107,8 @@ export default function App() {
     const currentSession = session;
     const generation = sessionGeneration.current;
     const request = ++refreshGeneration.current;
-    setBusy(true);
+    const statusRequest = ++statusRefreshGeneration.current;
+    if (!silent) setBusy(true);
     try {
       const [c, p, a, d, e] = await Promise.all([
         supabase.from("classes").select("*").order("name"),
@@ -146,11 +154,10 @@ export default function App() {
       setAssignments(m);
       setDeviceError(d.error ? databaseError(d.error) : null);
       setDevice((d.data?.[0] as Device | undefined) || null);
-      const statusMap: Record<string, EnrollmentStatus> = {};
-      for (const status of (e.data || []) as EnrollmentStatus[]) {
-        statusMap[status.person_id] = status;
-      }
-      setEnrollmentStatuses(statusMap);
+      if (statusRequest === statusRefreshGeneration.current && !e.error)
+        setEnrollmentStatuses(
+          indexEnrollmentStatuses((e.data || []) as EnrollmentStatus[]),
+        );
     } catch (error) {
       if (
         !isCurrentSession(generation, currentSession) ||
@@ -162,9 +169,31 @@ export default function App() {
     } finally {
       if (
         isCurrentSession(generation, currentSession) &&
-        request === refreshGeneration.current
+        request === refreshGeneration.current && !silent
       )
         setBusy(false);
+    }
+  }
+  async function refreshEnrollmentStatuses() {
+    if (!supabase || !session || statusRefreshPending.current) return;
+    const currentSession = session;
+    const generation = sessionGeneration.current;
+    const statusRequest = ++statusRefreshGeneration.current;
+    statusRefreshPending.current = true;
+    try {
+      const { data, error } = await supabase.rpc("get_fingerprint_statuses");
+      if (
+        error ||
+        !isCurrentSession(generation, currentSession) ||
+        statusRequest !== statusRefreshGeneration.current
+      ) return;
+      setEnrollmentStatuses(
+        indexEnrollmentStatuses((data || []) as EnrollmentStatus[]),
+      );
+    } catch {
+      // Keep the last known state until the next status poll succeeds.
+    } finally {
+      statusRefreshPending.current = false;
     }
   }
   useEffect(() => {
@@ -259,13 +288,13 @@ export default function App() {
   );
   useEffect(() => {
     if (!session || !supabase || !hasEnrollmentInProgress) return;
-    const timer = window.setInterval(() => void refresh(), 2000);
+    const timer = window.setInterval(() => void refreshEnrollmentStatuses(), 2000);
     return () => window.clearInterval(timer);
   }, [session?.user.id, hasEnrollmentInProgress]);
   useEffect(() => {
     if (!session || !supabase) return;
     const timer = window.setInterval(() => {
-      void refresh();
+      void refresh(true);
     }, DEVICE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [session?.user.id]);
@@ -445,7 +474,11 @@ export default function App() {
       userRole !== "administrator" ||
       !device ||
       !terminalOnline ||
-      mutationPending.current
+      !canRequestEnrollment(
+        enrollmentStatuses[person.id],
+        terminalOnline,
+        mutationPending.current,
+      )
     ) {
       if (!terminalOnline) showNotice("Terminal offline.", "error");
       return;
@@ -453,14 +486,17 @@ export default function App() {
     mutationPending.current = true;
     setBusy(true);
     try {
-      const { error } = await supabase.rpc("create_enrollment_command", {
+      const { data, error } = await supabase.rpc("create_enrollment_command", {
         p_person_id: person.id,
         p_device_id: device.id,
       });
       if (error) showNotice(databaseError(error), "error");
       else {
         showNotice(`Enrollment started for ${person.full_name}.`);
-        await refresh();
+        setEnrollmentStatuses((current) =>
+          enrollmentStarted(current, person.id, device, data as string),
+        );
+        await refreshEnrollmentStatuses();
       }
     } catch (error) {
       showNotice(caughtError(error), "error");

@@ -33,6 +33,12 @@ uint16_t rendered_template_id = 0;
 uint16_t rendered_confidence = 0;
 EnrollmentState rendered_enrollment_state = EnrollmentState::Idle;
 String active_enrollment_command_id;
+bool enrollment_ack_pending = false;
+bool enrollment_ack_success = false;
+uint16_t enrollment_ack_template_id = 0;
+String enrollment_ack_error;
+uint32_t next_enrollment_ack = 0;
+constexpr uint32_t EnrollmentAckRetryMs = 5000;
 
 const char* menu_label(uint8_t index) {
   switch (index) {
@@ -59,11 +65,22 @@ void draw_home() {
   const char* title = "TERMINAL READY";
   uint16_t color = CampusIdDisplay::Success;
   if (enrollment != EnrollmentState::Idle) {
-    title = enrollment == EnrollmentState::Success
-                ? "ENROLLMENT COMPLETE"
-                : enrollment == EnrollmentState::Failed
-                    ? "ENROLLMENT FAILED"
-                    : "ENROLL STUDENT";
+    switch (enrollment) {
+      case EnrollmentState::CaptureFirst:
+      case EnrollmentState::ConvertFirstCapture:
+      case EnrollmentState::CheckExistingTemplate: title = "ENROLLMENT"; break;
+      case EnrollmentState::WaitingForRemoval: title = "FIRST CAPTURE OK"; break;
+      case EnrollmentState::CaptureSecond:
+      case EnrollmentState::ConvertSecondCapture: title = "SECOND CAPTURE"; break;
+      case EnrollmentState::CreatingModel:
+      case EnrollmentState::CheckingStorage:
+      case EnrollmentState::ReadingStorageIndex:
+      case EnrollmentState::StoringModel: title = "PROCESSING"; break;
+      case EnrollmentState::AwaitingAck: title = "CONFIRMING"; break;
+      case EnrollmentState::Success: title = "FINGERPRINT ENROLLED"; break;
+      case EnrollmentState::Failed: title = "ENROLLMENT FAILED"; break;
+      default: break;
+    }
     color = enrollment == EnrollmentState::Success
                 ? CampusIdDisplay::Success
                 : enrollment == EnrollmentState::Failed
@@ -89,30 +106,37 @@ void draw_home() {
   display.panel(10, 148, 220, 82, color);
   display.text(title, 20, 162, 1, CampusIdDisplay::Background);
   if (enrollment != EnrollmentState::Idle) {
-    display.text(fingerprint.enrollmentName().c_str(), 20, 185, 1,
+    display.text(fingerprint.enrollmentName().substring(0, 31).c_str(), 20, 185, 1,
                  CampusIdDisplay::Background);
-    display.text(enrollmentStateName(enrollment), 20, 208, 1,
-                 CampusIdDisplay::Background);
+    if (enrollment == EnrollmentState::Success) {
+      display.text((String("Template #") + fingerprint.enrollmentTemplateId()).c_str(),
+                   20, 208, 1, CampusIdDisplay::Background);
+    } else if (enrollment == EnrollmentState::Failed) {
+      display.text(fingerprint.enrollmentError().c_str(), 20, 208, 1,
+                   CampusIdDisplay::Background);
+    } else {
+      display.text(enrollmentStateName(enrollment), 20, 208, 1,
+                   CampusIdDisplay::Background);
+    }
   } else {
     display.text(fingerprintStateName(state), 20, 185, 1,
                  CampusIdDisplay::Background);
   }
-  if (enrollment == EnrollmentState::Success) {
-    display.text("Template stored", 20, 216, 1,
-                 CampusIdDisplay::Background);
-  } else if (state == FingerprintState::Matched && has_last_match) {
+  if (enrollment == EnrollmentState::Idle &&
+      state == FingerprintState::Matched && has_last_match) {
     display.text("Template:", 20, 202, 1, CampusIdDisplay::Background);
     display.text(String(last_match.template_id).c_str(), 105, 202, 1,
                  CampusIdDisplay::Background);
     display.text("Confidence:", 20, 216, 1, CampusIdDisplay::Background);
     display.text(String(last_match.confidence).c_str(), 105, 216, 1,
                  CampusIdDisplay::Background);
-  } else if (state == FingerprintState::NoMatch) {
+  } else if (enrollment == EnrollmentState::Idle && state == FingerprintState::NoMatch) {
     display.text("Try again after removal", 20, 208, 1, CampusIdDisplay::Background);
-  } else if (state == FingerprintState::SensorUnavailable ||
-             state == FingerprintState::CommunicationError) {
+  } else if (enrollment == EnrollmentState::Idle &&
+             (state == FingerprintState::SensorUnavailable ||
+             state == FingerprintState::CommunicationError)) {
     display.text("Retrying safely", 20, 208, 1, CampusIdDisplay::Background);
-  } else if (state == FingerprintState::Ready) {
+  } else if (enrollment == EnrollmentState::Idle && state == FingerprintState::Ready) {
     display.text("PLACE FINGER", 20, 208, 1, CampusIdDisplay::Background);
   }
   display.text("Local recognition only", 20, 250, 1, CampusIdDisplay::Muted);
@@ -188,7 +212,18 @@ void draw_about() {
 void render(bool force = false) {
   if (!display.available()) return;
   const FingerprintState fingerprint_state = fingerprint.state();
-  const EnrollmentState enrollment_state = fingerprint.enrollmentState();
+  const EnrollmentState current_enrollment = fingerprint.enrollmentState();
+  const EnrollmentState enrollment_state =
+      current_enrollment == EnrollmentState::ConvertFirstCapture ||
+              current_enrollment == EnrollmentState::CheckExistingTemplate
+          ? EnrollmentState::CaptureFirst
+          : current_enrollment == EnrollmentState::ConvertSecondCapture
+              ? EnrollmentState::CaptureSecond
+              : current_enrollment == EnrollmentState::StoringModel ||
+                        current_enrollment == EnrollmentState::CheckingStorage ||
+                        current_enrollment == EnrollmentState::ReadingStorageIndex
+                    ? EnrollmentState::CreatingModel
+                    : current_enrollment;
   const bool match_changed =
       has_last_match != rendered_has_match ||
       (has_last_match &&
@@ -197,7 +232,7 @@ void render(bool force = false) {
   if (!force && has_rendered && screen == rendered_screen &&
       fingerprint_state == rendered_fingerprint_state &&
       network.state() == rendered_network_state && !match_changed) {
-    if (fingerprint.enrollmentState() == rendered_enrollment_state) return;
+    if (enrollment_state == rendered_enrollment_state) return;
   }
   if (screen == Screen::Home) draw_home();
   else if (screen == Screen::Menu) draw_menu();
@@ -208,7 +243,7 @@ void render(bool force = false) {
   rendered_screen = screen;
   rendered_fingerprint_state = fingerprint_state;
   rendered_network_state = network.state();
-  rendered_enrollment_state = fingerprint.enrollmentState();
+  rendered_enrollment_state = enrollment_state;
   rendered_has_match = has_last_match;
   rendered_template_id = last_match.template_id;
   rendered_confidence = last_match.confidence;
@@ -340,12 +375,13 @@ void loop() {
   if (fingerprint.takeEnrollmentResult(enrollment_success,
                                        enrollment_template_id,
                                        enrollment_error)) {
-    network.completeEnrollment(active_enrollment_command_id,
-                               enrollment_success, enrollment_template_id,
-                               enrollment_error.c_str());
-    completed_enrollment_request = true;
+    enrollment_ack_pending = true;
+    enrollment_ack_success = enrollment_success;
+    enrollment_ack_template_id = enrollment_template_id;
+    enrollment_ack_error = enrollment_error;
+    next_enrollment_ack = 0;
     if (enrollment_success) {
-      Serial.print("Enrollment complete: template_id=");
+      Serial.print("Enrollment stored; awaiting ACK: template_id=");
       Serial.println(enrollment_template_id);
     }
     redraw = true;
@@ -363,20 +399,42 @@ void loop() {
     }
   }
   EnrollmentCommand command;
-  if (!fingerprint.enrollmentActive() &&
+  if (!enrollment_ack_pending && active_enrollment_command_id.length() == 0 &&
+      !fingerprint.enrollmentActive() &&
       fingerprint.enrollmentState() == EnrollmentState::Idle &&
       network.takeEnrollmentCommand(command)) {
     active_enrollment_command_id = command.id;
-    fingerprint.beginEnrollment(command.display_name);
+    fingerprint.beginEnrollment(command.display_name,
+                                command.reserved_slots,
+                                command.reservations_valid);
     redraw = true;
   }
   // Service connectivity and at most one cloud request after biometric work.
-  // Enrollment acknowledgements already used this turn's HTTP slot.
+  // ACK retries and heartbeat share this turn's single HTTP slot.
   network.updateConnection();
+  if (enrollment_ack_pending && network.wifiConnected() &&
+      static_cast<int32_t>(millis() - next_enrollment_ack) >= 0) {
+    completed_enrollment_request = true;
+    const EnrollmentAckResult acknowledgement =
+        network.completeEnrollment(active_enrollment_command_id,
+                                   enrollment_ack_success,
+                                   enrollment_ack_template_id,
+                                   enrollment_ack_error.c_str());
+    if (acknowledgement != EnrollmentAckResult::Retry) {
+      enrollment_ack_pending = false;
+      active_enrollment_command_id = "";
+      fingerprint.enrollmentAcknowledged(
+          acknowledgement == EnrollmentAckResult::Completed ||
+          (acknowledgement == EnrollmentAckResult::Failed && !enrollment_ack_success));
+    } else {
+      next_enrollment_ack = millis() + EnrollmentAckRetryMs;
+    }
+  }
   if (!completed_enrollment_request) {
     if (network.heartbeatDue()) {
       network.sendHeartbeat(fingerprint.state() == FingerprintState::Ready);
-    } else if (!fingerprint.enrollmentActive() &&
+    } else if (!enrollment_ack_pending && active_enrollment_command_id.length() == 0 &&
+               !fingerprint.enrollmentActive() &&
                fingerprint.enrollmentState() == EnrollmentState::Idle &&
                fingerprint.state() == FingerprintState::Ready &&
                network.commandPollDue()) {

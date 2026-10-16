@@ -6,6 +6,8 @@ struct EnrollmentCommand {
   String id;
   String person_id;
   String display_name;
+  bool reservations_valid = false;
+  uint8_t reserved_slots[128] = {};
 };
 
 enum class NetworkState {
@@ -14,6 +16,8 @@ enum class NetworkState {
   Connecting,
   Online,
 };
+
+enum class EnrollmentAckResult { Retry, Completed, Failed };
 
 class NetworkService {
  public:
@@ -25,8 +29,9 @@ class NetworkService {
   void pollCommand();
   NetworkState state() const { return state_; }
   bool online() const { return state_ == NetworkState::Online; }
+  bool wifiConnected() const { return wifi_associated_; }
   bool takeEnrollmentCommand(EnrollmentCommand& command);
-  void completeEnrollment(const String& command_id, bool success,
+  EnrollmentAckResult completeEnrollment(const String& command_id, bool success,
                           uint16_t template_id = 0,
                           const char* error_message = nullptr);
 

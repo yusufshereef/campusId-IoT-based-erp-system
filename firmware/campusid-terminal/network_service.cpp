@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <string.h>
 
 #include "hardware_config.h"
 
@@ -229,6 +230,9 @@ bool NetworkService::sendCommandRequest(const String& payload,
   const int status = request.POST(payload);
   response = request.getString();
   request.end();
+  Serial.print("Device command HTTP: ");
+  Serial.println(status);
+  if (status < 0) Serial.println(request.errorToString(status));
   return status >= 200 && status < 300;
 }
 
@@ -254,6 +258,34 @@ String jsonString(const String& source, const char* key) {
   }
   return value;
 }
+
+bool jsonReservedSlots(const String& source, uint8_t slots[128]) {
+  memset(slots, 0, 128);
+  const int marker = source.indexOf("\"reserved_slots\"");
+  if (marker < 0) return false;
+  int position = source.indexOf('[', marker);
+  if (position < 0) return false;
+  ++position;
+  while (position < source.length()) {
+    while (position < source.length() &&
+           (source[position] == ' ' || source[position] == ',')) ++position;
+    if (position >= source.length()) return false;
+    if (source[position] == ']') return true;
+    if (source[position] < '0' || source[position] > '9') return false;
+    uint32_t slot = 0;
+    do {
+      slot = slot * 10 + (source[position] - '0');
+      if (slot > 1023) return false;
+      ++position;
+    } while (position < source.length() && source[position] >= '0' &&
+             source[position] <= '9');
+    slots[slot / 8] |= 1u << (slot % 8);
+    while (position < source.length() && source[position] == ' ') ++position;
+    if (position >= source.length() ||
+        (source[position] != ',' && source[position] != ']')) return false;
+  }
+  return false;
+}
 }
 
 void NetworkService::pollCommands() {
@@ -269,13 +301,15 @@ void NetworkService::pollCommands() {
   command.id = jsonString(response, "id");
   command.person_id = jsonString(response, "person_id");
   command.display_name = jsonString(response, "display_name");
+  command.reservations_valid =
+      jsonReservedSlots(response, command.reserved_slots);
   if (command.id.length() > 0 && command.person_id.length() > 0) {
     pending_command_ = command;
     has_pending_command_ = true;
   }
 }
 
-void NetworkService::completeEnrollment(const String& command_id, bool success,
+EnrollmentAckResult NetworkService::completeEnrollment(const String& command_id, bool success,
                                         uint16_t template_id,
                                         const char* error_message) {
   String payload = "{\"device_id\":\"";
@@ -296,7 +330,15 @@ void NetworkService::completeEnrollment(const String& command_id, bool success,
   String response;
   if (!sendCommandRequest(payload, response)) {
     Serial.println("Enrollment acknowledgement failed");
+    return EnrollmentAckResult::Retry;
   }
+  if (response.indexOf("\"status\":\"completed\"") >= 0)
+    return EnrollmentAckResult::Completed;
+  if (response.indexOf("\"status\":\"failed\"") >= 0 ||
+      response.indexOf("\"status\":\"cancelled\"") >= 0 ||
+      response.indexOf("\"status\":\"rejected\"") >= 0)
+    return EnrollmentAckResult::Failed;
+  return EnrollmentAckResult::Retry;
 }
 
 const char* networkStateName(NetworkState state) {
