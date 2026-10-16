@@ -10,7 +10,11 @@ import {
   Users,
 } from "lucide-react";
 import type { CampusClass, Device, Person, Tab } from "../lib/types";
-import { deviceStatus, formatLastSeen } from "../lib/device_status";
+import {
+  deviceReadiness,
+  deviceStatus,
+  formatLastSeen,
+} from "../lib/device_status";
 
 type OverviewProps = {
   classes: CampusClass[];
@@ -21,6 +25,7 @@ type OverviewProps = {
   isAdmin: boolean;
   device: Device | null;
   deviceError: string | null;
+  now: number;
   onNavigate: (tab: Tab) => void;
 };
 
@@ -33,9 +38,11 @@ export function Overview({
   isAdmin,
   device,
   deviceError,
+  now,
   onNavigate,
 }: OverviewProps) {
-  const terminalOnline = deviceStatus(device);
+  const terminalOnline = deviceStatus(device, now);
+  const terminalReadiness = deviceReadiness(device, now);
   const enrolled = students.filter(
     (student) => student.fingerprint_status === "enrolled",
   ).length;
@@ -155,7 +162,7 @@ export function Overview({
               </div>
               <div>
                 <small>Last seen</small>
-                <b>{formatLastSeen(device?.last_seen_at || null)}</b>
+                <b>{formatLastSeen(device?.last_seen_at || null, now)}</b>
               </div>
               <div>
                 <small>Pending sync</small>
@@ -227,7 +234,21 @@ export function Overview({
             <span>
               <Fingerprint size={18} /> Fingerprint terminal
             </span>
-            <span className="badge neutral">Not integrated</span>
+            <span
+              className={`badge ${
+                terminalReadiness === "connected"
+                  ? "success"
+                  : terminalReadiness === "offline"
+                    ? "warning"
+                    : "neutral"
+              }`}
+            >
+              {terminalReadiness === "connected"
+                ? "Connected"
+                : terminalReadiness === "offline"
+                  ? "Offline"
+                  : "Not integrated"}
+            </span>
           </div>
           <div className="system-row">
             <span>

@@ -40,7 +40,8 @@ export default function App() {
     [session, setSession] = useState<Session | null>(null),
     [userRole, setUserRole] = useState<string | null>(null),
     [roleReady, setRoleReady] = useState(false),
-    [authReady, setAuthReady] = useState(!supabase);
+    [authReady, setAuthReady] = useState(!supabase),
+    [now, setNow] = useState(() => Date.now());
   const sessionRef = useRef<Session | null>(null);
   const sessionGeneration = useRef(0);
   const refreshGeneration = useRef(0);
@@ -65,7 +66,7 @@ export default function App() {
       () => people.filter((p) => p.role === "teacher"),
       [people],
     );
-  const terminalOnline = deviceStatus(device);
+  const terminalOnline = deviceStatus(device, now);
   function isCurrentSession(
     generation: number,
     currentSession: Session | null,
@@ -243,6 +244,10 @@ export default function App() {
     }, 15000);
     return () => window.clearInterval(timer);
   }, [session?.user.id]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   async function signIn(e: FormEvent) {
     e.preventDefault();
     if (!supabase) return;
@@ -684,6 +689,7 @@ export default function App() {
               isAdmin={userRole === "administrator"}
               device={device}
               deviceError={deviceError}
+              now={now}
               onNavigate={navigate}
             />
           )}
