@@ -29,6 +29,11 @@ import {
   enrollmentStarted,
   indexEnrollmentStatuses,
 } from "./lib/enrollment_status";
+import {
+  confirmRecordDeletion,
+  withoutClass,
+  withoutPerson,
+} from "./lib/record_deletion";
 import type {
   CampusClass,
   Device,
@@ -468,6 +473,110 @@ export default function App() {
       }
     }
   }
+  async function deleteStudent(person: Person) {
+    if (!supabase || userRole !== "administrator" || mutationPending.current) return;
+    if (!confirmRecordDeletion("student", (message) => window.confirm(message))) return;
+    const generation = sessionGeneration.current;
+    refreshGeneration.current++;
+    statusRefreshGeneration.current++;
+    mutationPending.current = true;
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("delete_student", {
+        p_person_id: person.id,
+      });
+      if (!isCurrentSession(generation, session)) return;
+      if (error) {
+        showNotice(databaseError(error), "error");
+        return;
+      }
+      setPeople((current) => withoutPerson(current, person.id));
+      setEnrollmentStatuses((current) => {
+        const next = { ...current };
+        delete next[person.id];
+        return next;
+      });
+      showNotice(`${person.full_name} deleted.`);
+    } catch (error) {
+      if (isCurrentSession(generation, session))
+        showNotice(caughtError(error), "error");
+    } finally {
+      if (isCurrentSession(generation, session)) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  async function deleteTeacher(person: Person) {
+    if (!supabase || userRole !== "administrator" || mutationPending.current) return;
+    if (!confirmRecordDeletion("teacher", (message) => window.confirm(message))) return;
+    const generation = sessionGeneration.current;
+    refreshGeneration.current++;
+    statusRefreshGeneration.current++;
+    mutationPending.current = true;
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("delete_teacher", {
+        p_person_id: person.id,
+      });
+      if (!isCurrentSession(generation, session)) return;
+      if (error) {
+        showNotice(databaseError(error), "error");
+        return;
+      }
+      setPeople((current) => withoutPerson(current, person.id));
+      setAssignments((current) => {
+        const next = { ...current };
+        delete next[person.id];
+        return next;
+      });
+      showNotice(`${person.full_name} deleted.`);
+    } catch (error) {
+      if (isCurrentSession(generation, session))
+        showNotice(caughtError(error), "error");
+    } finally {
+      if (isCurrentSession(generation, session)) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  async function deleteClass(classRecord: CampusClass) {
+    if (!supabase || userRole !== "administrator" || mutationPending.current) return;
+    if (!confirmRecordDeletion("class", (message) => window.confirm(message))) return;
+    const generation = sessionGeneration.current;
+    refreshGeneration.current++;
+    statusRefreshGeneration.current++;
+    mutationPending.current = true;
+    setBusy(true);
+    try {
+      const { error } = await supabase.rpc("delete_class", {
+        p_class_id: classRecord.id,
+      });
+      if (!isCurrentSession(generation, session)) return;
+      if (error) {
+        showNotice(databaseError(error), "error");
+        return;
+      }
+      setClasses((current) => withoutClass(current, classRecord.id));
+      setAssignments((current) => {
+        const next: Record<string, string[]> = {};
+        for (const [teacherId, classIds] of Object.entries(current)) {
+          next[teacherId] = classIds.filter((id) => id !== classRecord.id);
+        }
+        return next;
+      });
+      showNotice(`${classRecord.name}-${classRecord.section} deleted.`);
+    } catch (error) {
+      if (isCurrentSession(generation, session))
+        showNotice(caughtError(error), "error");
+    } finally {
+      if (isCurrentSession(generation, session)) {
+        mutationPending.current = false;
+        setBusy(false);
+      }
+    }
+  }
   async function requestEnrollment(person: Person) {
     if (
       !supabase ||
@@ -842,6 +951,7 @@ export default function App() {
                       <th scope="col">Section</th>
                       <th scope="col">Academic year</th>
                       <th scope="col">ID</th>
+                      {userRole === "administrator" && <th scope="col">Action</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -853,6 +963,17 @@ export default function App() {
                         <td>
                           <code>{c.id.slice(0, 8)}…</code>
                         </td>
+                        {userRole === "administrator" && (
+                          <td>
+                            <button
+                              className="outline danger"
+                              onClick={() => void deleteClass(c)}
+                              disabled={busy}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -1084,13 +1205,26 @@ export default function App() {
                           </td>
                           {userRole === "administrator" && (
                             <td>
-                              <button
-                                className="outline"
-                                onClick={() => void activeToggle(p)}
-                                disabled={busy}
-                              >
-                                {p.active ? "Deactivate" : "Activate"}
-                              </button>
+                              <div className="row-actions">
+                                <button
+                                  className="outline"
+                                  onClick={() => void activeToggle(p)}
+                                  disabled={busy}
+                                >
+                                  {p.active ? "Deactivate" : "Activate"}
+                                </button>
+                                <button
+                                  className="outline danger"
+                                  onClick={() =>
+                                    void (p.role === "student"
+                                      ? deleteStudent(p)
+                                      : deleteTeacher(p))
+                                  }
+                                  disabled={busy}
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             </td>
                           )}
                         </tr>

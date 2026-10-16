@@ -727,6 +727,20 @@ input::placeholder {
   color: var(--blue);
   background: #f3f8f4;
 }
+.outline.danger {
+  border-color: #e4b9b9;
+  color: #9a3434;
+}
+.outline.danger:hover:not(:disabled) {
+  border-color: #c66a6a;
+  color: #842828;
+  background: #fff4f4;
+}
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .outline.selected {
   color: var(--success);
   border-color: #97c7a6;
