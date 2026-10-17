@@ -60,6 +60,11 @@ int main() {
     bool known = false;
     assert(!recovery.templatePresent(1, known) && known);
     assert(recovery.templatePresent(2, known) && known);
+    // A retry on the exact authoritative slot converges without another
+    // physical mutation once absence has been verified from the sensor.
+    assert(recovery.deleteTemplate(1, error));
+    assert(sensor_fixture.delete_calls == 1);
+    assert(recovery.state() == FingerprintState::WaitingForRemoval);
   }
   {
     FingerprintService service;
@@ -68,6 +73,7 @@ int main() {
     assert(!service.deleteTemplate(0, error));
     assert(!service.deleteTemplate(65, error));
     assert(sensor_fixture.delete_calls == 0);
+    sensor_fixture.occupied[0] = 1u << 2;
     sensor_fixture.delete_result = FINGERPRINT_FLASHERR;
     assert(!service.deleteTemplate(2, error));
     assert(sensor_fixture.delete_calls == 1 && sensor_fixture.deleted_slot == 2);

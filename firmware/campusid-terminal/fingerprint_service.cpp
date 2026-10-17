@@ -99,13 +99,39 @@ bool FingerprintService::deleteTemplate(uint16_t slot_id, String& error_message)
     error_message = "Invalid fingerprint slot; fingerprint retained";
     return false;
   }
+  // A retry is bound to the backend-authoritative slot. If recovery proves
+  // that exact slot is already empty, converge without issuing another delete.
+  bool presence_known = false;
+  const bool present = templatePresent(slot_id, presence_known);
+  if (presence_known && !present) {
+    removal_required_ = true;
+    setState(FingerprintState::WaitingForRemoval);
+    return true;
+  }
+  if (!presence_known) {
+    error_message = "Could not verify fingerprint slot; inspect terminal";
+    return false;
+  }
   // This is the only deleteModel call for a claimed command. The caller retains
   // the result and retries only the backend acknowledgement.
   const uint8_t result = sensor_.deleteModel(slot_id);
   if (result != FINGERPRINT_OK) {
-    error_message = result == FINGERPRINT_PACKETRECIEVEERR
-        ? "Sensor communication error; inspect terminal"
-        : "Sensor rejected deletion; fingerprint retained";
+    if (result == FINGERPRINT_BADLOCATION) {
+      const bool still_present = templatePresent(slot_id, presence_known);
+      if (presence_known && !still_present) {
+        removal_required_ = true;
+        setState(FingerprintState::WaitingForRemoval);
+        return true;
+      }
+    }
+    if (result == FINGERPRINT_PACKETRECIEVEERR)
+      error_message = "Sensor communication error; deletion outcome uncertain";
+    else if (result == FINGERPRINT_FLASHERR)
+      error_message = "Sensor flash error; inspect terminal";
+    else if (result == FINGERPRINT_BADLOCATION)
+      error_message = "Target slot could not be verified; inspect terminal";
+    else
+      error_message = "Sensor rejected deletion; fingerprint retained";
     return false;
   }
   if (sensor_.getTemplateCount() != FINGERPRINT_OK) {

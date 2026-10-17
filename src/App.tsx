@@ -1213,7 +1213,7 @@ export default function App() {
                                         }
                                         disabled={
                                           busy ||
-                                          enrollmentStatus === "in_progress" ||
+                                          ["in_progress", "delete_processing"].includes(enrollmentStatus) ||
                                           !terminalOnline
                                         }
                                         title={
@@ -1287,7 +1287,12 @@ export default function App() {
                                       ? deleteStudent(p)
                                       : deleteTeacher(p))
                                   }
-                                  disabled={busy}
+                                  disabled={
+                                    busy ||
+                                    (p.role === "student" && ["in_progress", "delete_processing"].includes(
+                                      enrollmentStatuses[p.id]?.enrollment_status || "",
+                                    ))
+                                  }
                                 >
                                   Delete
                                 </button>
