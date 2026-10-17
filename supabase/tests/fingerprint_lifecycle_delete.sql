@@ -35,17 +35,22 @@ end $$;
 
 do $$
 declare
-  d uuid:=gen_random_uuid(); d2 uuid:=gen_random_uuid(); s uuid:=gen_random_uuid(); c uuid; answer jsonb;
+  d uuid:=gen_random_uuid(); d2 uuid:=gen_random_uuid(); d3 uuid:=gen_random_uuid();
+  s uuid:=gen_random_uuid(); c uuid; answer jsonb;
   failed_s uuid:=gen_random_uuid(); failed_c uuid;
+  delete_s uuid:=gen_random_uuid(); delete_c uuid;
 begin
   insert into pg_temp.devices(id,device_code,display_name,secret_hash,last_seen_at,sensor_ready)
     values(d,'lifecycle-test','Temporary terminal',repeat('0',64),now(),true),
-          (d2,'lifecycle-failure','Temporary terminal 2',repeat('1',64),now(),true);
+          (d2,'lifecycle-failure','Temporary terminal 2',repeat('1',64),now(),true),
+          (d3,'lifecycle-student-delete','Temporary terminal 3',repeat('2',64),now(),true);
   insert into pg_temp.people(id,full_name,role,roll_number,class_id)
     values(s,'Lifecycle student','student','life-1',gen_random_uuid()),
-          (failed_s,'Failure student','student','life-2',gen_random_uuid());
+          (failed_s,'Failure student','student','life-2',gen_random_uuid()),
+          (delete_s,'Delete student','student','life-3',gen_random_uuid());
   insert into pg_temp.fingerprint_mappings(device_id,slot_id,person_id)
-    values('lifecycle-test',3,s),('lifecycle-failure',4,failed_s);
+    values('lifecycle-test',3,s),('lifecycle-failure',4,failed_s),
+          ('lifecycle-student-delete',5,delete_s);
 
   c:=pg_temp.create_fingerprint_delete_command(s,'reenroll');
   answer:=pg_temp.claim_device_command(d,64);
@@ -72,6 +77,16 @@ begin
   assert exists(select 1 from pg_temp.fingerprint_mappings where person_id=failed_s and slot_id=4),
     'Physical failure removed the mapping';
   insert into pg_temp.lifecycle_results values('physical failure retains mapping',true,null);
+
+  delete_c:=pg_temp.create_fingerprint_delete_command(delete_s,'student_delete');
+  answer:=pg_temp.claim_device_command(d3,64);
+  assert answer->>'id'=delete_c::text and (answer->>'reserved_slot')::integer=5,
+    'Student deletion claimed the wrong slot';
+  answer:=pg_temp.complete_device_command(delete_c,d3,true,5,null);
+  assert answer->>'status'='completed','Student physical deletion was not acknowledged';
+  assert not exists(select 1 from pg_temp.people where id=delete_s),
+    'Student record was removed before/without successful physical deletion';
+  insert into pg_temp.lifecycle_results values('student deletion follows physical confirmation',true,null);
 end $$;
 select * from pg_temp.lifecycle_results order by test;
 rollback;
