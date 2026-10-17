@@ -17,6 +17,14 @@
   --weight-medium: 500;
   --weight-semibold: 600;
   --weight-bold: 700;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --shadow-card: 0 1px 2px rgb(20 24 28 / 3%), 0 4px 12px rgb(20 24 28 / 2.5%);
+  --shadow-popover: 0 10px 28px rgb(20 24 28 / 14%), 0 2px 5px rgb(20 24 28 / 5%);
   font-family: var(--font-sans);
   color: var(--text-primary);
   background: var(--bg-app);
@@ -1578,7 +1586,7 @@ td b { font-weight: var(--weight-semibold); }
   border-color: #dfe3e7;
   border-radius: 11px;
   background: #fff;
-  box-shadow: 0 1px 2px rgb(20 24 28 / 3%), 0 4px 12px rgb(20 24 28 / 2.5%);
+  box-shadow: var(--shadow-card);
 }
 .panel { padding: 21px; }
 .panel h2, .overview-panel-heading h2 { color: #202328; }
@@ -1659,4 +1667,114 @@ button { transition: background-color 140ms, border-color 140ms, box-shadow 140m
   .panel { padding: 17px; }
   .panel > .form { padding: 12px; }
   .topbar-title { font-size: 22px; }
+}
+
+/* Shared finishing details across all dashboard sections. */
+.sidebar { padding: 22px 14px 14px; }
+.brand { padding: 0 8px 27px; }
+.brand > div:last-child { min-width: 0; }
+.navlabel { margin: 16px 10px 7px; font-size: 10px; letter-spacing: 1.05px; }
+.sidebar nav { margin-bottom: 12px; }
+.nav { min-height: 38px; padding-inline: 11px; border-radius: 8px; color: #59616b; }
+.nav svg { color: currentColor; stroke-width: 1.8; }
+.nav.chosen { box-shadow: inset 0 0 0 1px rgb(255 255 255 / 8%), 0 2px 5px rgb(24 28 32 / 10%); }
+.device {
+  gap: 8px;
+  margin-top: auto;
+  padding: 11px 10px;
+  border-color: #dfe5e7;
+  border-radius: 10px;
+  background: #f7f9f9;
+}
+.device > div { min-width: 0; flex: 1; }
+.device b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device em { margin-left: 0; font-size: 8px; font-weight: 650; letter-spacing: .8px; }
+.admin { margin-top: 12px; padding: 11px 8px 0; }
+.admin > span { color: #286e5d; background: #eaf4f0; }
+.topbar { min-height: 60px; padding-inline: 28px; border-bottom-color: #e0e4e7; }
+.topbar-actions { gap: 10px; }
+.topbar-actions .good, .topbar-actions .warn {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #e2e7e8;
+  border-radius: 999px;
+  background: #f8fafa;
+}
+.topbar-actions .good { color: #286e5d; }
+.topbar-actions .warn { color: #8a6118; border-color: #eee3c8; background: #fffaf0; }
+.refresh { width: 36px; height: 36px; border-color: #d9dfe3; box-shadow: 0 1px 2px rgb(20 24 28 / 4%); }
+.content { padding: 28px; }
+.heading { margin-bottom: 20px; }
+.heading p { max-width: 760px; font-size: 13px; color: #68717d; }
+.overview-dashboard { gap: 16px; }
+.overview-metrics { gap: 14px; }
+.overview-metric { min-height: 78px; padding: 14px 16px; transition: border-color 150ms, box-shadow 150ms, transform 150ms; }
+.overview-metric:hover { border-color: #ccd8d5; box-shadow: var(--shadow-card), 0 5px 14px rgb(28 56 48 / 4%); transform: translateY(-1px); }
+.overview-metric > div { gap: 10px; }
+.overview-metric > div > svg { width: 32px; height: 32px; padding: 7px; border: 1px solid #d9ebe5; border-radius: 9px; background: #eef6f3; }
+.overview-metric small { color: #626b75; }
+.overview-metric strong { font-size: 24px; }
+.overview-main-grid { gap: 16px; }
+.overview-panel { padding: 19px 20px; }
+.overview-panel-heading { margin-bottom: 12px; }
+.overview-panel-heading > svg { width: 31px; height: 31px; padding: 7px; border: 1px solid #e1e8e7; border-radius: 9px; color: #387c6b; background: #f3f8f6; }
+.overview-system-row, .overview-operation-list > div { min-height: 38px; }
+.overview-attention { border-radius: 11px; box-shadow: 0 1px 2px rgb(20 24 28 / 3%); }
+.overview-operational { padding: 3px 2px; font-weight: 550; }
+.panel, .stat { transition: border-color 150ms, box-shadow 150ms; }
+.panel h2 { font-size: 15px; }
+.section-heading { margin-bottom: 16px; }
+.listhead { align-items: center; }
+.listhead h2 { margin-top: 0; }
+.listhead .muted { margin-top: 5px; }
+.tablewrap { border-radius: 11px; box-shadow: 0 1px 2px rgb(20 24 28 / 3%); }
+th { padding: 12px 14px; }
+td { padding: 12px 14px; }
+tbody tr { transition: background-color 120ms; }
+.block { margin-top: 5px; }
+.active, .inactive, .fingerprint-status, .attendance-status { padding: 5px 9px; border: 1px solid transparent; }
+.active, .status-enrolled, .attendance-status.present { border-color: #d7ebe2; }
+.inactive, .status-not_enrolled { border-color: #e8eaed; }
+.status-in_progress, .status-delete_processing { border-color: #efe2c4; }
+.status-failed, .status-delete_failed, .status-student_delete_failed { border-color: #f1d8d6; }
+.panel > .form { gap: 14px; }
+.panel > .form > button { align-self: end; }
+.search { min-height: 38px; background: #fff; }
+.empty { padding-block: 28px; border: 1px dashed #d9dfe3; border-radius: 9px; background: #fafbfb; }
+.primary, .outline, .refresh, .action-menu-trigger, .signout { transition: background-color 140ms, border-color 140ms, box-shadow 140ms, color 140ms, transform 140ms; }
+.outline:active:not(:disabled), .refresh:active:not(:disabled), .action-menu-trigger:active { transform: translateY(1px); }
+.action-menu-list { box-shadow: var(--shadow-popover); }
+.toast { box-shadow: 0 8px 24px rgb(20 24 28 / 10%); }
+.confirmation-modal { padding: 24px; }
+.confirmation-modal > p { margin: 0 0 13px; }
+.confirmation-modal label { gap: 8px; margin: 16px 0; }
+.confirmation-error { border: 1px solid #f0d0d0; background: #fff5f4; }
+.auth-shell { background: radial-gradient(ellipse at 20% 10%, #e6efed, transparent 52%), #f3f5f6; }
+.auth-card { border-color: #e0e5e7; border-radius: 16px; box-shadow: 0 12px 32px rgb(20 24 28 / 8%); }
+.auth-card h1 { color: #202328; }
+.sidebar, .tablewrap { scrollbar-width: thin; scrollbar-color: #c8ced4 transparent; }
+@media (max-width: 1200px) {
+  .topbar { padding-inline: 24px; }
+  .content { padding: 24px; }
+}
+@media (max-width: 900px) {
+  .topbar { padding-inline: 18px; }
+  .content { padding: 22px 18px; }
+}
+@media (max-width: 700px) {
+  .sidebar { padding: 16px 14px 9px; }
+  .brand { padding: 0 4px 14px; }
+  .brand b { font-size: 16px; }
+  .sidebar nav { gap: 4px; }
+  .nav { min-height: 36px; padding: 8px 10px; }
+  .topbar { min-height: 56px; padding-inline: 14px; }
+  .topbar-actions { gap: 6px; }
+  .topbar-actions .good, .topbar-actions .warn { max-width: 118px; padding-inline: 7px; font-size: 9px; }
+  .content { padding: 18px 14px; }
+  .overview-metrics { gap: 9px; }
+  .overview-metric { padding: 10px; }
+  .overview-metric > div { gap: 6px; }
+  .overview-metric > div > svg { width: 28px; height: 28px; padding: 6px; }
+  .overview-metric small { font-size: 11px; }
+  .overview-metric strong { font-size: 21px; }
 }

@@ -932,14 +932,14 @@ export default function App() {
             </button>
           ))}
         </nav>
-        {tab !== "overview" && <div className="device">
+        <div className="device">
           <span className={`dot ${terminalOnline ? "" : "offline"}`} />
           <div>
             <b>{device?.display_name || "CampusID Terminal"}</b>
             <small>{terminalOnline ? "Online" : "Offline"}</small>
           </div>
           <em>{terminalOnline ? "LIVE" : "WAITING"}</em>
-        </div>}
+        </div>
         <div className="admin">
           <span>{userRole === "administrator" ? "AD" : "TC"}</span>
           <div>
