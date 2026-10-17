@@ -89,6 +89,50 @@ bool FingerprintService::beginEnrollment(const String& display_name,
   return true;
 }
 
+bool FingerprintService::deleteTemplate(uint16_t slot_id, String& error_message) {
+  error_message = "";
+  if (state_ != FingerprintState::Ready || enrollment_state_ != EnrollmentState::Idle) {
+    error_message = "Terminal busy; fingerprint retained";
+    return false;
+  }
+  if (slot_id == 0 || slot_id > sensor_.capacity) {
+    error_message = "Invalid fingerprint slot; fingerprint retained";
+    return false;
+  }
+  // This is the only deleteModel call for a claimed command. The caller retains
+  // the result and retries only the backend acknowledgement.
+  const uint8_t result = sensor_.deleteModel(slot_id);
+  if (result != FINGERPRINT_OK) {
+    error_message = result == FINGERPRINT_PACKETRECIEVEERR
+        ? "Sensor communication error; inspect terminal"
+        : "Sensor rejected deletion; fingerprint retained";
+    return false;
+  }
+  if (sensor_.getTemplateCount() != FINGERPRINT_OK) {
+    error_message = "Delete accepted but verification failed; inspect terminal";
+    return false;
+  }
+  removal_required_ = true;
+  setState(FingerprintState::WaitingForRemoval);
+  return true;
+}
+
+bool FingerprintService::templatePresent(uint16_t slot_id, bool& known) {
+  known = false;
+  if (state_ != FingerprintState::Ready || slot_id == 0 || slot_id > sensor_.capacity)
+    return false;
+  const uint8_t result = sensor_.loadModel(slot_id);
+  if (result == FINGERPRINT_OK) {
+    known = true;
+    return true;
+  }
+  if (result == FINGERPRINT_NOTFOUND) {
+    known = true;
+    return false;
+  }
+  return false;
+}
+
 bool FingerprintService::resetFingerprintDatabase() {
   Serial.println("Fingerprint reset requested");
   if (state_ != FingerprintState::Ready || enrollment_state_ != EnrollmentState::Idle) {

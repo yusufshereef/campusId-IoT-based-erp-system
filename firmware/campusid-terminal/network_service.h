@@ -4,6 +4,7 @@
 
 struct EnrollmentCommand {
   String id;
+  String command_type;
   String person_id;
   String display_name;
   uint16_t reserved_slot = 0;

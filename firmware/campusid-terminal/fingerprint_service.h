@@ -47,6 +47,8 @@ class FingerprintService {
   FingerprintState state() const { return state_; }
   bool takeMatch(FingerprintMatch& result);
   bool beginEnrollment(const String& display_name, uint16_t reserved_slot);
+  bool deleteTemplate(uint16_t slot_id, String& error_message);
+  bool templatePresent(uint16_t slot_id, bool& known);
   bool resetFingerprintDatabase();
   uint16_t capacity() const { return sensor_.capacity; }
   uint16_t templateCount() const { return sensor_.templateCount; }

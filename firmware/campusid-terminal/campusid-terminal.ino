@@ -7,6 +7,7 @@
 #include "status_feedback.h"
 
 #include <string.h>
+#include <Preferences.h>
 
 DisplayAdapter display;
 KeypadInput keypad;
@@ -14,6 +15,7 @@ StatusFeedback feedback;
 HardwareSelfTest self_test;
 FingerprintService fingerprint;
 NetworkService network;
+Preferences lifecycle_preferences;
 
 enum class Screen { Home, Menu, HardwareTest, DeviceStatus, About };
 Screen screen = Screen::Home;
@@ -35,12 +37,21 @@ uint16_t rendered_template_id = 0;
 uint16_t rendered_confidence = 0;
 EnrollmentState rendered_enrollment_state = EnrollmentState::Idle;
 String active_enrollment_command_id;
+String active_command_type;
 bool enrollment_ack_pending = false;
 bool enrollment_ack_success = false;
 uint16_t enrollment_ack_template_id = 0;
 String enrollment_ack_error;
 uint32_t next_enrollment_ack = 0;
 constexpr uint32_t EnrollmentAckRetryMs = 5000;
+void saveDeleteResult(bool known) {
+  lifecycle_preferences.putBool("pending", true);
+  lifecycle_preferences.putBool("known", known);
+  lifecycle_preferences.putString("command", active_enrollment_command_id);
+  lifecycle_preferences.putUShort("slot", enrollment_ack_template_id);
+  lifecycle_preferences.putBool("success", enrollment_ack_success);
+  lifecycle_preferences.putString("error", enrollment_ack_error);
+}
 char maintenance_command[40];
 uint8_t maintenance_command_length = 0;
 bool maintenance_command_overflow = false;
@@ -103,7 +114,10 @@ void draw_home() {
   const EnrollmentState enrollment = fingerprint.enrollmentState();
   const char* title = "TERMINAL READY";
   uint16_t color = CampusIdDisplay::Success;
-  if (enrollment != EnrollmentState::Idle) {
+  if (active_command_type == "DELETE_FINGERPRINT") {
+    title = enrollment_ack_success ? "DELETE CONFIRMING" : "DELETE FAILED";
+    color = enrollment_ack_success ? CampusIdDisplay::Accent : CampusIdDisplay::Error;
+  } else if (enrollment != EnrollmentState::Idle) {
     switch (enrollment) {
       case EnrollmentState::PreparingEnrollment: title = "PREPARING"; break;
       case EnrollmentState::CaptureFirst:
@@ -143,7 +157,12 @@ void draw_home() {
   }
   display.panel(10, 148, 220, 82, color);
   display.text(title, 20, 162, 1, CampusIdDisplay::Background);
-  if (enrollment != EnrollmentState::Idle) {
+  if (active_command_type == "DELETE_FINGERPRINT") {
+    display.text((String("Template #") + enrollment_ack_template_id).c_str(), 20, 185, 1,
+                 CampusIdDisplay::Background);
+    display.text(enrollment_ack_success ? "Waiting for backend ACK" : enrollment_ack_error.c_str(),
+                 20, 208, 1, CampusIdDisplay::Background);
+  } else if (enrollment != EnrollmentState::Idle) {
     display.text(fingerprint.enrollmentName().substring(0, 31).c_str(), 20, 185, 1,
                  CampusIdDisplay::Background);
     if (enrollment == EnrollmentState::Success) {
@@ -312,6 +331,20 @@ void handle_key(Key key) {
 
 void setup() {
   Serial.begin(115200);
+  lifecycle_preferences.begin("campusid", false);
+  if (lifecycle_preferences.getBool("pending", false)) {
+    active_enrollment_command_id = lifecycle_preferences.getString("command", "");
+    active_command_type = "DELETE_FINGERPRINT";
+    enrollment_ack_template_id = lifecycle_preferences.getUShort("slot", 0);
+    const bool result_known = lifecycle_preferences.getBool("known", false);
+    enrollment_ack_success = result_known && lifecycle_preferences.getBool("success", false);
+    enrollment_ack_error = result_known
+        ? lifecycle_preferences.getString("error", "")
+        : "Restart interrupted deletion; inspect terminal before retry";
+    enrollment_ack_pending = active_enrollment_command_id.length() > 0 &&
+                             enrollment_ack_template_id > 0;
+    if (!enrollment_ack_pending) lifecycle_preferences.putBool("pending", false);
+  }
   Serial.println("\nCampusID terminal boot");
   Serial.print("Firmware: ");
   Serial.println(CAMPUSID_FIRMWARE_VERSION);
@@ -336,6 +369,21 @@ void setup() {
     Serial.println("TFT: unavailable; continuing without display");
   }
   fingerprint.begin();
+  if (lifecycle_preferences.getBool("pending", false) &&
+      !lifecycle_preferences.getBool("known", false)) {
+    bool sensor_result_known = false;
+    const bool template_still_present =
+        fingerprint.templatePresent(enrollment_ack_template_id, sensor_result_known);
+    if (sensor_result_known) {
+      enrollment_ack_success = !template_still_present;
+      enrollment_ack_error = template_still_present
+          ? "Template remains after restart; deletion was not repeated"
+          : "";
+      saveDeleteResult(true);
+    } else {
+      enrollment_ack_error = "Delete outcome uncertain after restart; inspect terminal";
+    }
+  }
   Serial.print("Fingerprint sensor: ");
   Serial.println(fingerprintStateName(fingerprint.state()));
 #if ENABLE_KEYPAD
@@ -445,7 +493,25 @@ void loop() {
       fingerprint.enrollmentState() == EnrollmentState::Idle &&
       network.takeEnrollmentCommand(command)) {
     active_enrollment_command_id = command.id;
-    fingerprint.beginEnrollment(command.display_name, command.reserved_slot);
+    active_command_type = command.command_type;
+    if (command.command_type == "DELETE_FINGERPRINT") {
+      enrollment_ack_template_id = command.reserved_slot;
+      enrollment_ack_success = false;
+      enrollment_ack_error = "Restart interrupted deletion; inspect terminal before retry";
+      saveDeleteResult(false);
+      String delete_error;
+      enrollment_ack_success = fingerprint.deleteTemplate(command.reserved_slot, delete_error);
+      enrollment_ack_template_id = command.reserved_slot;
+      enrollment_ack_error = delete_error;
+      enrollment_ack_pending = true;
+      next_enrollment_ack = 0;
+      saveDeleteResult(true);
+      Serial.print("Fingerprint delete physical result for slot ");
+      Serial.print(command.reserved_slot);
+      Serial.println(enrollment_ack_success ? ": success" : ": failure");
+    } else {
+      fingerprint.beginEnrollment(command.display_name, command.reserved_slot);
+    }
     redraw = true;
     if (screen == Screen::Home || screen == Screen::DeviceStatus) render();
   }
@@ -463,9 +529,16 @@ void loop() {
     if (acknowledgement != EnrollmentAckResult::Retry) {
       enrollment_ack_pending = false;
       active_enrollment_command_id = "";
-      fingerprint.enrollmentAcknowledged(
-          acknowledgement == EnrollmentAckResult::Completed ||
-          (acknowledgement == EnrollmentAckResult::Failed && !enrollment_ack_success));
+      if (active_command_type == "DELETE_FINGERPRINT")
+        lifecycle_preferences.putBool("pending", false);
+      if (active_command_type == "ENROLL_FINGERPRINT") {
+        fingerprint.enrollmentAcknowledged(
+            acknowledgement == EnrollmentAckResult::Completed ||
+            (acknowledgement == EnrollmentAckResult::Failed && !enrollment_ack_success));
+      }
+      active_command_type = "";
+      redraw = true;
+      if (screen == Screen::Home || screen == Screen::DeviceStatus) render();
     } else {
       next_enrollment_ack = millis() + EnrollmentAckRetryMs;
     }

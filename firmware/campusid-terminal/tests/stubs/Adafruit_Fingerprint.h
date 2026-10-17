@@ -26,8 +26,12 @@ struct SensorFixture {
   uint8_t store = FINGERPRINT_OK;
   unsigned stores = 0;
   unsigned empty_calls = 0;
+  unsigned delete_calls = 0;
   uint16_t stored_slot = 0;
+  uint16_t deleted_slot = 0;
   uint8_t empty_result = FINGERPRINT_OK;
+  uint8_t delete_result = FINGERPRINT_OK;
+  uint8_t load_result = FINGERPRINT_OK;
 };
 inline SensorFixture sensor_fixture;
 
@@ -72,5 +76,17 @@ class Adafruit_Fingerprint {
     if (sensor_fixture.store == FINGERPRINT_OK)
       sensor_fixture.occupied[slot / 8] |= 1u << (slot % 8);
     return sensor_fixture.store;
+  }
+  uint8_t deleteModel(uint16_t slot) {
+    ++sensor_fixture.delete_calls;
+    sensor_fixture.deleted_slot = slot;
+    if (sensor_fixture.delete_result == FINGERPRINT_OK)
+      sensor_fixture.occupied[slot / 8] &= ~(1u << (slot % 8));
+    return sensor_fixture.delete_result;
+  }
+  uint8_t loadModel(uint16_t slot) {
+    if (sensor_fixture.load_result != FINGERPRINT_OK) return sensor_fixture.load_result;
+    return sensor_fixture.occupied[slot / 8] & (1u << (slot % 8))
+        ? FINGERPRINT_OK : FINGERPRINT_NOTFOUND;
   }
 };

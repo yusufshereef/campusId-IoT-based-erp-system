@@ -32,7 +32,7 @@ export type EnrollmentStatus = {
   device_code: string | null;
   display_name: string | null;
   slot_id: number | null;
-  enrollment_status: "not_enrolled" | "in_progress" | "enrolled" | "failed";
+  enrollment_status: string;
   command_id: string | null;
   command_status: string | null;
   error_message: string | null;

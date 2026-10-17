@@ -289,7 +289,7 @@ export default function App() {
     };
   }, [session?.user.id]);
   const hasEnrollmentInProgress = Object.values(enrollmentStatuses).some(
-    (status) => status.enrollment_status === "in_progress",
+    (status) => ["in_progress", "delete_processing"].includes(status.enrollment_status),
   );
   useEffect(() => {
     if (!session || !supabase || !hasEnrollmentInProgress) return;
@@ -475,6 +475,10 @@ export default function App() {
   }
   async function deleteStudent(person: Person) {
     if (!supabase || userRole !== "administrator" || mutationPending.current) return;
+    if (enrollmentStatuses[person.id]?.slot_id) {
+      await requestFingerprintDeletion(person, "student");
+      return;
+    }
     if (!confirmRecordDeletion("student", (message) => window.confirm(message))) return;
     const generation = sessionGeneration.current;
     refreshGeneration.current++;
@@ -607,6 +611,41 @@ export default function App() {
         );
         await refreshEnrollmentStatuses();
       }
+    } catch (error) {
+      showNotice(caughtError(error), "error");
+    } finally {
+      mutationPending.current = false;
+      setBusy(false);
+    }
+  }
+  async function requestFingerprintDeletion(person: Person, purpose: "remove" | "reenroll" | "student") {
+    if (!supabase || userRole !== "administrator" || !terminalOnline || mutationPending.current) {
+      if (!terminalOnline) showNotice("Terminal offline.", "error");
+      return;
+    }
+    const prompt = purpose === "remove"
+      ? "Remove this fingerprint?\nThe physical fingerprint template will be removed from the CampusID terminal. The student record will remain."
+      : purpose === "reenroll"
+        ? "Re-enroll fingerprint?\nThe existing physical template will be removed first. Enrollment can start after the terminal confirms deletion."
+        : "Delete student?\nThe physical fingerprint template will be removed first. The student record will be deleted only after the terminal confirms removal.";
+    if (!window.confirm(prompt)) return;
+    mutationPending.current = true;
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.rpc("create_fingerprint_delete_command", {
+        p_person_id: person.id,
+        p_workflow: purpose === "reenroll" ? "reenroll" : purpose === "student" ? "student_delete" : "remove",
+      });
+      if (error) {
+        showNotice(databaseError(error), "error");
+        return;
+      }
+      showNotice(purpose === "remove"
+        ? `Fingerprint removal started for ${person.full_name}. The student record will remain.`
+        : purpose === "reenroll"
+          ? `Fingerprint removal started for ${person.full_name}. Enrollment will start after the terminal confirms deletion.`
+          : `Fingerprint removal started for ${person.full_name}. The student will be deleted after the terminal confirms removal, provided attendance history allows deletion.`);
+      await refreshEnrollmentStatuses();
     } catch (error) {
       showNotice(caughtError(error), "error");
     } finally {
@@ -1188,6 +1227,34 @@ export default function App() {
                                           : "Enroll fingerprint"}
                                       </button>
                                     )}
+                                  {p.role === "student" &&
+                                    userRole === "administrator" &&
+                                    enrollmentStatus === "enrolled" && (
+                                      <>
+                                        <button
+                                          className="outline danger"
+                                          onClick={() => void requestFingerprintDeletion(p, "remove")}
+                                          disabled={busy || !terminalOnline}
+                                          title={terminalOnline ? "Remove fingerprint" : "Terminal offline"}
+                                        >
+                                          Delete fingerprint
+                                        </button>
+                                        <button
+                                          className="outline"
+                                          onClick={() => void requestFingerprintDeletion(p, "reenroll")}
+                                          disabled={busy || !terminalOnline}
+                                          title={terminalOnline ? "Remove the old template before enrolling again" : "Terminal offline"}
+                                        >
+                                          Re-enroll fingerprint
+                                        </button>
+                                      </>
+                                    )}
+                                  {enrollmentStatus === "delete_processing" && (
+                                    <small className="block">Terminal is removing this template…</small>
+                                  )}
+                                  {enrollmentStatus === "delete_failed" && (
+                                    <small className="block">Removal failed. The fingerprint remains enrolled.</small>
+                                  )}
                                   {enrollmentStatus === "failed" &&
                                     status?.error_message && (
                                       <small className="block">

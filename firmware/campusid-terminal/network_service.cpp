@@ -290,11 +290,14 @@ void NetworkService::pollCommands(uint16_t sensor_capacity) {
   }
   EnrollmentCommand command;
   command.id = jsonString(response, "id");
+  command.command_type = jsonString(response, "command_type");
   command.person_id = jsonString(response, "person_id");
   command.display_name = jsonString(response, "display_name");
   command.reserved_slot = jsonNumber(response, "reserved_slot");
   if (command.id.length() > 0 && command.person_id.length() > 0 &&
-      command.reserved_slot > 0) {
+      command.reserved_slot > 0 &&
+      (command.command_type == "ENROLL_FINGERPRINT" ||
+       command.command_type == "DELETE_FINGERPRINT")) {
     pending_command_ = command;
     has_pending_command_ = true;
   }
@@ -309,10 +312,11 @@ EnrollmentAckResult NetworkService::completeEnrollment(const String& command_id,
   payload += command_id;
   payload += "\",\"success\":";
   payload += (success ? "true" : "false");
-  if (success) {
+  if (template_id > 0) {
     payload += ",\"template_id\":";
     payload += String(template_id);
-  } else if (error_message) {
+  }
+  if (!success && error_message) {
     payload += ",\"error_message\":\"";
     payload += error_message;
     payload += "\"";
