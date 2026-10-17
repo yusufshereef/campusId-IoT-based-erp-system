@@ -275,6 +275,15 @@ uint16_t jsonNumber(const String& source, const char* key) {
            source[position] <= '9');
   return static_cast<uint16_t>(value);
 }
+
+bool jsonBool(const String& source, const char* key) {
+  const String marker = String("\"") + key + "\":";
+  const int start = source.indexOf(marker);
+  if (start < 0) return false;
+  int position = start + marker.length();
+  while (position < source.length() && source[position] == ' ') ++position;
+  return source.substring(position, position + 4) == "true";
+}
 }
 
 void NetworkService::pollCommands(uint16_t sensor_capacity) {
@@ -294,7 +303,9 @@ void NetworkService::pollCommands(uint16_t sensor_capacity) {
   command.person_id = jsonString(response, "person_id");
   command.display_name = jsonString(response, "display_name");
   command.reserved_slot = jsonNumber(response, "reserved_slot");
-  if (command.id.length() > 0 && command.person_id.length() > 0 &&
+  command.cleanup_only = jsonBool(response, "cleanup_only");
+  const bool identifiers_valid = command.cleanup_only || command.person_id.length() > 0;
+  if (command.id.length() > 0 && identifiers_valid &&
       command.reserved_slot > 0 &&
       (command.command_type == "ENROLL_FINGERPRINT" ||
        command.command_type == "DELETE_FINGERPRINT")) {

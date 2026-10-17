@@ -61,7 +61,9 @@ export default function App() {
     [userRole, setUserRole] = useState<string | null>(null),
     [roleReady, setRoleReady] = useState(false),
     [authReady, setAuthReady] = useState(!supabase),
-    [now, setNow] = useState(() => Date.now());
+    [now, setNow] = useState(() => Date.now()),
+    [studentDeleteCandidate, setStudentDeleteCandidate] = useState<Person | null>(null),
+    [studentDeleteConfirmation, setStudentDeleteConfirmation] = useState("");
   const sessionRef = useRef<Session | null>(null);
   const sessionGeneration = useRef(0);
   const refreshGeneration = useRef(0);
@@ -473,13 +475,15 @@ export default function App() {
       }
     }
   }
-  async function deleteStudent(person: Person) {
-    if (!supabase || userRole !== "administrator" || mutationPending.current) return;
-    if (enrollmentStatuses[person.id]?.slot_id) {
-      await requestFingerprintDeletion(person, "student");
-      return;
-    }
-    if (!confirmRecordDeletion("student", (message) => window.confirm(message))) return;
+  function deleteStudent(person: Person) {
+    if (userRole !== "administrator" || mutationPending.current) return;
+    setStudentDeleteConfirmation("");
+    setStudentDeleteCandidate(person);
+  }
+  async function confirmStudentDeletion() {
+    const person = studentDeleteCandidate;
+    if (!supabase || userRole !== "administrator" || mutationPending.current ||
+        !person || studentDeleteConfirmation !== person.roll_number) return;
     const generation = sessionGeneration.current;
     refreshGeneration.current++;
     statusRefreshGeneration.current++;
@@ -500,7 +504,9 @@ export default function App() {
         delete next[person.id];
         return next;
       });
-      showNotice(`${person.full_name} deleted.`);
+      setStudentDeleteCandidate(null);
+      setStudentDeleteConfirmation("");
+      showNotice("Student deleted. Any required fingerprint cleanup will complete when the terminal is available.");
     } catch (error) {
       if (isCurrentSession(generation, session))
         showNotice(caughtError(error), "error");
@@ -618,23 +624,21 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function requestFingerprintDeletion(person: Person, purpose: "remove" | "reenroll" | "student") {
+  async function requestFingerprintDeletion(person: Person, purpose: "remove" | "reenroll") {
     if (!supabase || userRole !== "administrator" || !terminalOnline || mutationPending.current) {
       if (!terminalOnline) showNotice("Terminal offline.", "error");
       return;
     }
     const prompt = purpose === "remove"
       ? "Remove this fingerprint?\nThe physical fingerprint template will be removed from the CampusID terminal. The student record will remain."
-      : purpose === "reenroll"
-        ? "Re-enroll fingerprint?\nThe existing physical template will be removed first. Enrollment can start after the terminal confirms deletion."
-        : "Delete student?\nThe physical fingerprint template will be removed first. The student record will be deleted only after the terminal confirms removal.";
+      : "Re-enroll fingerprint?\nThe existing physical template will be removed first. Enrollment can start after the terminal confirms deletion.";
     if (!window.confirm(prompt)) return;
     mutationPending.current = true;
     setBusy(true);
     try {
       const { data, error } = await supabase.rpc("create_fingerprint_delete_command", {
         p_person_id: person.id,
-        p_workflow: purpose === "reenroll" ? "reenroll" : purpose === "student" ? "student_delete" : "remove",
+        p_workflow: purpose === "reenroll" ? "reenroll" : "remove",
       });
       if (error) {
         showNotice(databaseError(error), "error");
@@ -1293,12 +1297,7 @@ export default function App() {
                                       ? deleteStudent(p)
                                       : deleteTeacher(p))
                                   }
-                                  disabled={
-                                    busy ||
-                                    (p.role === "student" && ["in_progress", "delete_processing"].includes(
-                                      enrollmentStatuses[p.id]?.enrollment_status || "",
-                                    ))
-                                  }
+                                  disabled={busy}
                                 >
                                   Delete
                                 </button>
@@ -1329,6 +1328,48 @@ export default function App() {
               progress.
             </span>
           </footer>
+          {studentDeleteCandidate && (
+            <div className="modal-backdrop" role="presentation">
+              <section
+                className="confirmation-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="student-delete-title"
+                aria-describedby="student-delete-description"
+              >
+                <h2 id="student-delete-title">Delete student?</h2>
+                <p id="student-delete-description">
+                  This permanently deletes this student and all of their CampusID data. If their fingerprint terminal is offline, physical fingerprint cleanup will be queued automatically.
+                </p>
+                <p>Type this roll number exactly: <code>{studentDeleteCandidate.roll_number}</code></p>
+                <label>
+                  Roll number
+                  <input
+                    autoFocus
+                    value={studentDeleteConfirmation}
+                    onChange={(event) => setStudentDeleteConfirmation(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && studentDeleteConfirmation === studentDeleteCandidate.roll_number)
+                        void confirmStudentDeletion();
+                      if (event.key === "Escape") setStudentDeleteCandidate(null);
+                    }}
+                  />
+                </label>
+                <div className="modal-actions">
+                  <button className="outline" onClick={() => setStudentDeleteCandidate(null)} disabled={busy}>
+                    Cancel
+                  </button>
+                  <button
+                    className="outline danger"
+                    onClick={() => void confirmStudentDeletion()}
+                    disabled={busy || !studentDeleteCandidate.roll_number || studentDeleteConfirmation !== studentDeleteCandidate.roll_number}
+                  >
+                    Delete student
+                  </button>
+                </div>
+              </section>
+            </div>
+          )}
         </div>
       </main>
     </div>

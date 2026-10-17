@@ -81,6 +81,16 @@ int main() {
   {
     FingerprintService service;
     sensor_fixture = SensorFixture{};
+    sensor_fixture.occupied[0] = 1u << 2;
+    service.begin();
+    sensor_fixture.load_result = FINGERPRINT_PACKETRECIEVEERR;
+    sensor_fixture.delete_result = FINGERPRINT_PACKETRECIEVEERR;
+    assert(!service.deleteTemplate(2, error));
+    assert(sensor_fixture.delete_calls == 1 && sensor_fixture.deleted_slot == 2);
+  }
+  {
+    FingerprintService service;
+    sensor_fixture = SensorFixture{};
     sensor_fixture.capacity = 72;
     sensor_fixture.occupied[0] = 2;
     service.begin();

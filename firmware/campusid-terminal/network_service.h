@@ -8,6 +8,7 @@ struct EnrollmentCommand {
   String person_id;
   String display_name;
   uint16_t reserved_slot = 0;
+  bool cleanup_only = false;
 };
 
 enum class NetworkState {

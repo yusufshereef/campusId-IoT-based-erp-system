@@ -87,6 +87,6 @@ class Adafruit_Fingerprint {
   uint8_t loadModel(uint16_t slot) {
     if (sensor_fixture.load_result != FINGERPRINT_OK) return sensor_fixture.load_result;
     return sensor_fixture.occupied[slot / 8] & (1u << (slot % 8))
-        ? FINGERPRINT_OK : FINGERPRINT_NOTFOUND;
+        ? FINGERPRINT_OK : FINGERPRINT_BADLOCATION;
   }
 };

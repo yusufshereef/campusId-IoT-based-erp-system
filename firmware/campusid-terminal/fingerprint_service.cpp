@@ -108,21 +108,18 @@ bool FingerprintService::deleteTemplate(uint16_t slot_id, String& error_message)
     setState(FingerprintState::WaitingForRemoval);
     return true;
   }
-  if (!presence_known) {
-    error_message = "Could not verify fingerprint slot; inspect terminal";
-    return false;
-  }
+  // If loadModel cannot establish presence, deleteModel still targets this
+  // exact validated slot. Its response determines whether cleanup converged.
   // This is the only deleteModel call for a claimed command. The caller retains
   // the result and retries only the backend acknowledgement.
   const uint8_t result = sensor_.deleteModel(slot_id);
   if (result != FINGERPRINT_OK) {
     if (result == FINGERPRINT_BADLOCATION) {
-      const bool still_present = templatePresent(slot_id, presence_known);
-      if (presence_known && !still_present) {
-        removal_required_ = true;
-        setState(FingerprintState::WaitingForRemoval);
-        return true;
-      }
+      // The requested slot has already been validated against sensor capacity;
+      // BADLOCATION here means that exact target is now absent.
+      removal_required_ = true;
+      setState(FingerprintState::WaitingForRemoval);
+      return true;
     }
     if (result == FINGERPRINT_PACKETRECIEVEERR)
       error_message = "Sensor communication error; deletion outcome uncertain";
@@ -132,10 +129,6 @@ bool FingerprintService::deleteTemplate(uint16_t slot_id, String& error_message)
       error_message = "Target slot could not be verified; inspect terminal";
     else
       error_message = "Sensor rejected deletion; fingerprint retained";
-    return false;
-  }
-  if (sensor_.getTemplateCount() != FINGERPRINT_OK) {
-    error_message = "Delete accepted but verification failed; inspect terminal";
     return false;
   }
   removal_required_ = true;
@@ -152,7 +145,10 @@ bool FingerprintService::templatePresent(uint16_t slot_id, bool& known) {
     known = true;
     return true;
   }
-  if (result == FINGERPRINT_NOTFOUND) {
+  // loadModel reports BADLOCATION for an unavailable page; NOTFOUND is the
+  // matching-search result and is not evidence that a template slot is empty.
+  // Bounds above ensure this is the exact in-capacity slot from the command.
+  if (result == FINGERPRINT_BADLOCATION) {
     known = true;
     return false;
   }
