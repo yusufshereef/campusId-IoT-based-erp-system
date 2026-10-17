@@ -22,6 +22,7 @@ import {
   validatePersonInput,
 } from "./lib/admin";
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
+import { DestructiveConfirmationModal } from "./components/DestructiveConfirmationModal";
 import { Overview } from "./components/Overview";
 import { DEVICE_REFRESH_INTERVAL_MS, deviceStatus } from "./lib/device_status";
 import {
@@ -30,10 +31,13 @@ import {
   indexEnrollmentStatuses,
 } from "./lib/enrollment_status";
 import {
-  confirmRecordDeletion,
   withoutClass,
   withoutPerson,
 } from "./lib/record_deletion";
+import {
+  classConfirmationValue,
+  teacherConfirmationValue,
+} from "./lib/destructive_confirmation";
 import type {
   CampusClass,
   Device,
@@ -43,6 +47,12 @@ import type {
   Notice,
 } from "./lib/types";
 
+type DestructiveAction =
+  | { kind: "student"; person: Person }
+  | { kind: "teacher"; person: Person }
+  | { kind: "class"; classRecord: CampusClass }
+  | { kind: "fingerprint"; person: Person; purpose: "remove" | "reenroll" };
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview"),
     [classes, setClasses] = useState<CampusClass[]>([]),
@@ -51,6 +61,7 @@ export default function App() {
     [enrollmentStatuses, setEnrollmentStatuses] = useState<
       Record<string, EnrollmentStatus>
     >({}),
+    [enrollmentStatusAvailable, setEnrollmentStatusAvailable] = useState(false),
     [device, setDevice] = useState<Device | null>(null),
     [deviceError, setDeviceError] = useState<string | null>(null),
     [notice, setNotice] = useState<Notice | null>(null),
@@ -62,14 +73,15 @@ export default function App() {
     [roleReady, setRoleReady] = useState(false),
     [authReady, setAuthReady] = useState(!supabase),
     [now, setNow] = useState(() => Date.now()),
-    [studentDeleteCandidate, setStudentDeleteCandidate] = useState<Person | null>(null),
-    [studentDeleteConfirmation, setStudentDeleteConfirmation] = useState("");
+    [confirmation, setConfirmation] = useState<DestructiveAction | null>(null),
+    [confirmationError, setConfirmationError] = useState<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
   const sessionGeneration = useRef(0);
   const refreshGeneration = useRef(0);
   const statusRefreshGeneration = useRef(0);
   const statusRefreshPending = useRef(false);
   const mutationPending = useRef(false);
+  const confirmationReturnFocus = useRef<HTMLElement | null>(null);
   const [classNameInput, setClassNameInput] = useState(""),
     [section, setSection] = useState("A"),
     [year, setYear] = useState("2026-27"),
@@ -161,10 +173,13 @@ export default function App() {
       setAssignments(m);
       setDeviceError(d.error ? databaseError(d.error) : null);
       setDevice((d.data?.[0] as Device | undefined) || null);
-      if (statusRequest === statusRefreshGeneration.current && !e.error)
-        setEnrollmentStatuses(
-          indexEnrollmentStatuses((e.data || []) as EnrollmentStatus[]),
-        );
+      if (statusRequest === statusRefreshGeneration.current) {
+        setEnrollmentStatusAvailable(!e.error);
+        if (!e.error)
+          setEnrollmentStatuses(
+            indexEnrollmentStatuses((e.data || []) as EnrollmentStatus[]),
+          );
+      }
     } catch (error) {
       if (
         !isCurrentSession(generation, currentSession) ||
@@ -190,15 +205,20 @@ export default function App() {
     try {
       const { data, error } = await supabase.rpc("get_fingerprint_statuses");
       if (
-        error ||
         !isCurrentSession(generation, currentSession) ||
         statusRequest !== statusRefreshGeneration.current
       ) return;
+      if (error) {
+        setEnrollmentStatusAvailable(false);
+        return;
+      }
       setEnrollmentStatuses(
         indexEnrollmentStatuses((data || []) as EnrollmentStatus[]),
       );
+      setEnrollmentStatusAvailable(true);
     } catch {
-      // Keep the last known state until the next status poll succeeds.
+      if (isCurrentSession(generation, currentSession))
+        setEnrollmentStatusAvailable(false);
     } finally {
       statusRefreshPending.current = false;
     }
@@ -227,6 +247,9 @@ export default function App() {
       setDevice(null);
       setDeviceError(null);
       setEnrollmentStatuses({});
+      setEnrollmentStatusAvailable(false);
+      setConfirmation(null);
+      setConfirmationError(null);
       setDbConnected(false);
       setNotice(null);
       setPassword("");
@@ -475,117 +498,123 @@ export default function App() {
       }
     }
   }
-  function deleteStudent(person: Person) {
+  function openDestructiveConfirmation(
+    action: DestructiveAction,
+    opener: HTMLElement,
+  ) {
     if (userRole !== "administrator" || mutationPending.current) return;
-    setStudentDeleteConfirmation("");
-    setStudentDeleteCandidate(person);
+    confirmationReturnFocus.current = opener;
+    setConfirmationError(null);
+    setConfirmation(action);
   }
-  async function confirmStudentDeletion() {
-    const person = studentDeleteCandidate;
-    if (!supabase || userRole !== "administrator" || mutationPending.current ||
-        !person || studentDeleteConfirmation !== person.roll_number) return;
+  function closeDestructiveConfirmation() {
+    if (mutationPending.current) return;
+    setConfirmation(null);
+    setConfirmationError(null);
+    window.requestAnimationFrame(() => {
+      const opener = confirmationReturnFocus.current;
+      if (opener?.isConnected) opener.focus();
+      else document.querySelector<HTMLElement>(".nav.chosen")?.focus();
+    });
+  }
+  async function confirmDestructiveAction() {
+    const action = confirmation;
+    if (!supabase || userRole !== "administrator" || mutationPending.current || !action) return;
     const generation = sessionGeneration.current;
     refreshGeneration.current++;
     statusRefreshGeneration.current++;
     mutationPending.current = true;
     setBusy(true);
+    setConfirmationError(null);
     try {
-      const { error } = await supabase.rpc("delete_student", {
-        p_person_id: person.id,
-      });
-      if (!isCurrentSession(generation, session)) return;
-      if (error) {
-        showNotice(databaseError(error), "error");
-        return;
-      }
-      setPeople((current) => withoutPerson(current, person.id));
-      setEnrollmentStatuses((current) => {
-        const next = { ...current };
-        delete next[person.id];
-        return next;
-      });
-      setStudentDeleteCandidate(null);
-      setStudentDeleteConfirmation("");
-      showNotice("Student deleted. Any required fingerprint cleanup will complete when the terminal is available.");
-    } catch (error) {
-      if (isCurrentSession(generation, session))
-        showNotice(caughtError(error), "error");
-    } finally {
-      if (isCurrentSession(generation, session)) {
-        mutationPending.current = false;
-        setBusy(false);
-      }
-    }
-  }
-  async function deleteTeacher(person: Person) {
-    if (!supabase || userRole !== "administrator" || mutationPending.current) return;
-    if (!confirmRecordDeletion("teacher", (message) => window.confirm(message))) return;
-    const generation = sessionGeneration.current;
-    refreshGeneration.current++;
-    statusRefreshGeneration.current++;
-    mutationPending.current = true;
-    setBusy(true);
-    try {
-      const { error } = await supabase.rpc("delete_teacher", {
-        p_person_id: person.id,
-      });
-      if (!isCurrentSession(generation, session)) return;
-      if (error) {
-        showNotice(databaseError(error), "error");
-        return;
-      }
-      setPeople((current) => withoutPerson(current, person.id));
-      setAssignments((current) => {
-        const next = { ...current };
-        delete next[person.id];
-        return next;
-      });
-      showNotice(`${person.full_name} deleted.`);
-    } catch (error) {
-      if (isCurrentSession(generation, session))
-        showNotice(caughtError(error), "error");
-    } finally {
-      if (isCurrentSession(generation, session)) {
-        mutationPending.current = false;
-        setBusy(false);
-      }
-    }
-  }
-  async function deleteClass(classRecord: CampusClass) {
-    if (!supabase || userRole !== "administrator" || mutationPending.current) return;
-    if (!confirmRecordDeletion("class", (message) => window.confirm(message))) return;
-    const generation = sessionGeneration.current;
-    refreshGeneration.current++;
-    statusRefreshGeneration.current++;
-    mutationPending.current = true;
-    setBusy(true);
-    try {
-      const { error } = await supabase.rpc("delete_class", {
-        p_class_id: classRecord.id,
-      });
-      if (!isCurrentSession(generation, session)) return;
-      if (error) {
-        showNotice(databaseError(error), "error");
-        return;
-      }
-      setClasses((current) => withoutClass(current, classRecord.id));
-      setAssignments((current) => {
-        const next: Record<string, string[]> = {};
-        for (const [teacherId, classIds] of Object.entries(current)) {
-          next[teacherId] = classIds.filter((id) => id !== classRecord.id);
+      if (action.kind === "student") {
+        const { error } = await supabase.rpc("delete_student", { p_person_id: action.person.id });
+        if (!isCurrentSession(generation, session)) return;
+        if (error) {
+          setConfirmationError(databaseError(error));
+          return;
         }
-        return next;
+        setPeople((current) => withoutPerson(current, action.person.id));
+        setEnrollmentStatuses((current) => {
+          const next = { ...current };
+          delete next[action.person.id];
+          return next;
+        });
+        showNotice("Student deleted. Any required fingerprint cleanup will complete when the terminal is available.");
+      } else if (action.kind === "teacher") {
+        const { error } = await supabase.rpc("delete_teacher", { p_person_id: action.person.id });
+        if (!isCurrentSession(generation, session)) return;
+        if (error) {
+          setConfirmationError(databaseError(error));
+          return;
+        }
+        setPeople((current) => withoutPerson(current, action.person.id));
+        setAssignments((current) => {
+          const next = { ...current };
+          delete next[action.person.id];
+          return next;
+        });
+        showNotice(`${action.person.full_name} deleted.`);
+      } else if (action.kind === "class") {
+        const { error } = await supabase.rpc("delete_class", { p_class_id: action.classRecord.id });
+        if (!isCurrentSession(generation, session)) return;
+        if (error) {
+          setConfirmationError(databaseError(error));
+          return;
+        }
+        setClasses((current) => withoutClass(current, action.classRecord.id));
+        setAssignments((current) => {
+          const next: Record<string, string[]> = {};
+          for (const [teacherId, classIds] of Object.entries(current)) {
+            next[teacherId] = classIds.filter((id) => id !== action.classRecord.id);
+          }
+          return next;
+        });
+        showNotice(`${action.classRecord.name}-${action.classRecord.section} deleted.`);
+      } else {
+        if (!terminalOnline) {
+          setConfirmationError("CampusID terminal must be online to modify fingerprints.");
+          return;
+        }
+        const { error } = await supabase.rpc("create_fingerprint_delete_command", {
+          p_person_id: action.person.id,
+          p_workflow: action.purpose === "reenroll" ? "reenroll" : "remove",
+        });
+        if (!isCurrentSession(generation, session)) return;
+        if (error) {
+          setConfirmationError(databaseError(error));
+          return;
+        }
+        showNotice(action.purpose === "remove"
+          ? `Fingerprint removal started for ${action.person.full_name}. The student record will remain.`
+          : `Fingerprint removal started for ${action.person.full_name}. Enrollment will start after the terminal confirms deletion.`);
+        await refreshEnrollmentStatuses();
+      }
+      setConfirmation(null);
+      setConfirmationError(null);
+      window.requestAnimationFrame(() => {
+        const opener = confirmationReturnFocus.current;
+        if (opener?.isConnected) opener.focus();
+        else document.querySelector<HTMLElement>(".nav.chosen")?.focus();
       });
-      showNotice(`${classRecord.name}-${classRecord.section} deleted.`);
     } catch (error) {
       if (isCurrentSession(generation, session))
-        showNotice(caughtError(error), "error");
+        setConfirmationError(caughtError(error));
     } finally {
       if (isCurrentSession(generation, session)) {
         mutationPending.current = false;
         setBusy(false);
       }
     }
+  }
+  function deleteStudent(person: Person, opener: HTMLElement) {
+    openDestructiveConfirmation({ kind: "student", person }, opener);
+  }
+  function deleteTeacher(person: Person, opener: HTMLElement) {
+    openDestructiveConfirmation({ kind: "teacher", person }, opener);
+  }
+  function deleteClass(classRecord: CampusClass, opener: HTMLElement) {
+    openDestructiveConfirmation({ kind: "class", classRecord }, opener);
   }
   async function requestEnrollment(person: Person) {
     if (
@@ -624,38 +653,12 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function requestFingerprintDeletion(person: Person, purpose: "remove" | "reenroll") {
-    if (!supabase || userRole !== "administrator" || !terminalOnline || mutationPending.current) {
-      if (!terminalOnline) showNotice("Terminal offline.", "error");
-      return;
-    }
-    const prompt = purpose === "remove"
-      ? "Remove this fingerprint?\nThe physical fingerprint template will be removed from the CampusID terminal. The student record will remain."
-      : "Re-enroll fingerprint?\nThe existing physical template will be removed first. Enrollment can start after the terminal confirms deletion.";
-    if (!window.confirm(prompt)) return;
-    mutationPending.current = true;
-    setBusy(true);
-    try {
-      const { data, error } = await supabase.rpc("create_fingerprint_delete_command", {
-        p_person_id: person.id,
-        p_workflow: purpose === "reenroll" ? "reenroll" : "remove",
-      });
-      if (error) {
-        showNotice(databaseError(error), "error");
-        return;
-      }
-      showNotice(purpose === "remove"
-        ? `Fingerprint removal started for ${person.full_name}. The student record will remain.`
-        : purpose === "reenroll"
-          ? `Fingerprint removal started for ${person.full_name}. Enrollment will start after the terminal confirms deletion.`
-          : `Fingerprint removal started for ${person.full_name}. The student will be deleted after the terminal confirms removal, provided attendance history allows deletion.`);
-      await refreshEnrollmentStatuses();
-    } catch (error) {
-      showNotice(caughtError(error), "error");
-    } finally {
-      mutationPending.current = false;
-      setBusy(false);
-    }
+  function requestFingerprintDeletion(
+    person: Person,
+    purpose: "remove" | "reenroll",
+    opener: HTMLElement,
+  ) {
+    openDestructiveConfirmation({ kind: "fingerprint", person, purpose }, opener);
   }
   function navigate(next: Tab) {
     setTab(next);
@@ -667,7 +670,7 @@ export default function App() {
     setNotice(null);
   }
   const descriptions: Record<Tab, string> = {
-    overview: "A connected view of your campus, ready for the day ahead.",
+    overview: "Terminal health, biometric operations, and campus totals.",
     attendance: "Open your class roster and make every presence count.",
     classes: "The academic groups at the heart of your campus.",
     students:
@@ -684,6 +687,56 @@ export default function App() {
           : tab === "students"
             ? "Students"
             : "Teachers";
+  const confirmationDetails = (() => {
+    if (!confirmation) return null;
+    if (confirmation.kind === "student") {
+      return {
+        title: "Delete student?",
+        description: "This permanently deletes this student and all associated CampusID data. This action cannot be undone.",
+        expectedValue: confirmation.person.roll_number || "",
+        expectedPrompt: `Type the student's roll number to confirm: ${confirmation.person.roll_number || ""}`,
+        confirmLabel: "Delete student",
+        tone: "danger" as const,
+      };
+    }
+    if (confirmation.kind === "teacher") {
+      const token = teacherConfirmationValue(confirmation.person.employee_id);
+      return {
+        title: "Delete teacher?",
+        description: "This permanently deletes this teacher and removes their class mappings. Classes themselves will not be deleted.",
+        expectedValue: token,
+        expectedPrompt: token === "DELETE"
+          ? "Type DELETE to confirm:"
+          : `Type the teacher ID to confirm: ${token}`,
+        confirmLabel: "Delete teacher",
+        tone: "danger" as const,
+      };
+    }
+    if (confirmation.kind === "class") {
+      const code = classConfirmationValue(confirmation.classRecord.name, confirmation.classRecord.section);
+      return {
+        title: "Delete class?",
+        description: "This permanently deletes this class. This action cannot be undone.",
+        expectedValue: code,
+        expectedPrompt: `Type the class code to confirm: ${code}`,
+        confirmLabel: "Delete class",
+        tone: "danger" as const,
+      };
+    }
+    return confirmation.purpose === "remove"
+      ? {
+          title: "Delete fingerprint?",
+          description: "This removes the fingerprint template from the CampusID terminal. The student record will remain.",
+          confirmLabel: "Delete fingerprint",
+          tone: "danger" as const,
+        }
+      : {
+          title: "Replace fingerprint?",
+          description: "The existing fingerprint will be removed before a new fingerprint is enrolled.",
+          confirmLabel: "Replace fingerprint",
+          tone: "warning" as const,
+        };
+  })();
   function classAssignment(person: Person) {
     const classIds =
       person.role === "teacher"
@@ -850,14 +903,14 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="device">
+        {tab !== "overview" && <div className="device">
           <span className={`dot ${terminalOnline ? "" : "offline"}`} />
           <div>
-            <b>CampusID Terminal 01</b>
+            <b>{device?.display_name || "CampusID Terminal"}</b>
             <small>{terminalOnline ? "Online" : "Offline"}</small>
           </div>
           <em>{terminalOnline ? "LIVE" : "WAITING"}</em>
-        </div>
+        </div>}
         <div className="admin">
           <span>{userRole === "administrator" ? "AD" : "TC"}</span>
           <div>
@@ -928,12 +981,13 @@ export default function App() {
               students={students}
               teachers={teachers}
               connected={dbConnected}
-              loading={busy}
+              loading={!dbConnected}
               isAdmin={userRole === "administrator"}
               device={device}
               deviceError={deviceError}
               now={now}
-              onNavigate={navigate}
+              enrollmentStatuses={enrollmentStatuses}
+              enrollmentStatusAvailable={enrollmentStatusAvailable}
             />
           )}
           {tab === "classes" && (
@@ -1010,7 +1064,7 @@ export default function App() {
                           <td>
                             <button
                               className="outline danger"
-                              onClick={() => void deleteClass(c)}
+                              onClick={(event) => deleteClass(c, event.currentTarget)}
                               disabled={busy}
                             >
                               Delete
@@ -1238,7 +1292,7 @@ export default function App() {
                                       <>
                                         <button
                                           className="outline danger"
-                                          onClick={() => void requestFingerprintDeletion(p, "remove")}
+                                          onClick={(event) => requestFingerprintDeletion(p, "remove", event.currentTarget)}
                                           disabled={busy || !terminalOnline}
                                           title={terminalOnline ? "Remove fingerprint" : "Terminal offline"}
                                         >
@@ -1246,7 +1300,7 @@ export default function App() {
                                         </button>
                                         <button
                                           className="outline"
-                                          onClick={() => void requestFingerprintDeletion(p, "reenroll")}
+                                          onClick={(event) => requestFingerprintDeletion(p, "reenroll", event.currentTarget)}
                                           disabled={busy || !terminalOnline}
                                           title={terminalOnline ? "Remove the old template before enrolling again" : "Terminal offline"}
                                         >
@@ -1292,11 +1346,9 @@ export default function App() {
                                 </button>
                                 <button
                                   className="outline danger"
-                                  onClick={() =>
-                                    void (p.role === "student"
-                                      ? deleteStudent(p)
-                                      : deleteTeacher(p))
-                                  }
+                                  onClick={(event) => p.role === "student"
+                                    ? deleteStudent(p, event.currentTarget)
+                                    : deleteTeacher(p, event.currentTarget)}
                                   disabled={busy}
                                 >
                                   Delete
@@ -1328,47 +1380,20 @@ export default function App() {
               progress.
             </span>
           </footer>
-          {studentDeleteCandidate && (
-            <div className="modal-backdrop" role="presentation">
-              <section
-                className="confirmation-modal"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="student-delete-title"
-                aria-describedby="student-delete-description"
-              >
-                <h2 id="student-delete-title">Delete student?</h2>
-                <p id="student-delete-description">
-                  This permanently deletes this student and all of their CampusID data. If their fingerprint terminal is offline, physical fingerprint cleanup will be queued automatically.
-                </p>
-                <p>Type this roll number exactly: <code>{studentDeleteCandidate.roll_number}</code></p>
-                <label>
-                  Roll number
-                  <input
-                    autoFocus
-                    value={studentDeleteConfirmation}
-                    onChange={(event) => setStudentDeleteConfirmation(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && studentDeleteConfirmation === studentDeleteCandidate.roll_number)
-                        void confirmStudentDeletion();
-                      if (event.key === "Escape") setStudentDeleteCandidate(null);
-                    }}
-                  />
-                </label>
-                <div className="modal-actions">
-                  <button className="outline" onClick={() => setStudentDeleteCandidate(null)} disabled={busy}>
-                    Cancel
-                  </button>
-                  <button
-                    className="outline danger"
-                    onClick={() => void confirmStudentDeletion()}
-                    disabled={busy || !studentDeleteCandidate.roll_number || studentDeleteConfirmation !== studentDeleteCandidate.roll_number}
-                  >
-                    Delete student
-                  </button>
-                </div>
-              </section>
-            </div>
+          {confirmation && confirmationDetails && (
+            <DestructiveConfirmationModal
+              key={`${confirmation.kind}-${confirmation.kind === "student" || confirmation.kind === "teacher" || confirmation.kind === "fingerprint" ? confirmation.person.id : confirmation.classRecord.id}-${confirmation.kind === "fingerprint" ? confirmation.purpose : ""}`}
+              title={confirmationDetails.title}
+              description={confirmationDetails.description}
+              expectedValue={"expectedValue" in confirmationDetails ? confirmationDetails.expectedValue : undefined}
+              expectedPrompt={"expectedPrompt" in confirmationDetails ? confirmationDetails.expectedPrompt : undefined}
+              confirmLabel={confirmationDetails.confirmLabel}
+              tone={confirmationDetails.tone}
+              loading={busy}
+              error={confirmationError}
+              onConfirm={() => void confirmDestructiveAction()}
+              onCancel={closeDestructiveConfirmation}
+            />
           )}
         </div>
       </main>

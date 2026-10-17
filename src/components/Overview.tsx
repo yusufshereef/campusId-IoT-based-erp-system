@@ -1,20 +1,6 @@
-import {
-  ArrowRight,
-  BookOpen,
-  Check,
-  Cpu,
-  Fingerprint,
-  GraduationCap,
-  Radio,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
-import type { CampusClass, Device, Person, Tab } from "../lib/types";
-import {
-  deviceReadiness,
-  deviceStatus,
-  formatLastSeen,
-} from "../lib/device_status";
+import { AlertTriangle, CheckCircle2, Fingerprint, Radio, Users } from "lucide-react";
+import type { CampusClass, Device, EnrollmentStatus, Person } from "../lib/types";
+import { deviceStatus, formatLastSeen } from "../lib/device_status";
 
 type OverviewProps = {
   classes: CampusClass[];
@@ -26,8 +12,15 @@ type OverviewProps = {
   device: Device | null;
   deviceError: string | null;
   now: number;
-  onNavigate: (tab: Tab) => void;
+  enrollmentStatuses: Record<string, EnrollmentStatus>;
+  enrollmentStatusAvailable: boolean;
 };
+
+const failureStates = new Set([
+  "failed",
+  "delete_failed",
+  "student_delete_failed",
+]);
 
 export function Overview({
   classes,
@@ -39,229 +32,143 @@ export function Overview({
   device,
   deviceError,
   now,
-  onNavigate,
+  enrollmentStatuses,
+  enrollmentStatusAvailable,
 }: OverviewProps) {
   const terminalOnline = deviceStatus(device, now);
-  const terminalReadiness = deviceReadiness(device, now);
-  const enrolled = students.filter(
-    (student) => student.fingerprint_status === "enrolled",
-  ).length;
-  const metrics = [
-    {
-      icon: BookOpen,
-      label: isAdmin ? "Classes" : "Assigned classes",
-      value: classes.length,
-      detail: "Academic groups",
-    },
-    {
-      icon: GraduationCap,
-      label: "Students",
-      value: students.length,
-      detail: `${students.filter((student) => student.active).length} active students`,
-    },
-    {
-      icon: Users,
-      label: "Teachers",
-      value: teachers.length,
-      detail: "Visible to your account",
-    },
-    {
-      icon: Fingerprint,
-      label: "Student fingerprints",
-      value: enrolled,
-      detail: "Enrollment records",
-    },
-  ];
-  const steps = [
-    {
-      title: "Create your classes",
-      detail: "Organize sections and academic years.",
-      complete: classes.length > 0,
-      tab: "classes" as const,
-    },
-    {
-      title: "Build your roster",
-      detail: "Register students and assign teachers.",
-      complete: students.length > 0 && teachers.length > 0,
-      tab: "students" as const,
-    },
-    {
-      title: "Take attendance",
-      detail: "Open a class, choose a date, and mark the roster.",
-      complete: false,
-      tab: "attendance" as const,
-    },
-  ];
+  const statuses = enrollmentStatusAvailable ? Object.values(enrollmentStatuses) : [];
+  const enrolled = statuses.filter((status) => status.enrollment_status === "enrolled").length;
+  const pendingEnrollment = statuses.filter((status) => status.enrollment_status === "in_progress").length;
+  const pendingRemoval = statuses.filter((status) => status.enrollment_status === "delete_processing").length;
+  const failedStatuses = statuses.filter((status) => failureStates.has(status.enrollment_status));
+
+  const attention: string[] = [];
+  if (deviceError) attention.push(`Terminal status could not be read: ${deviceError}`);
+  else if (!device) attention.push("Fingerprint terminal is not configured.");
+  else if (!terminalOnline) attention.push("Fingerprint terminal is offline.");
+  if (device && !device.sensor_ready) attention.push("Fingerprint sensor is unavailable.");
+  if (failedStatuses.length > 0) {
+    attention.push(`${failedStatuses.length} biometric operation${failedStatuses.length === 1 ? "" : "s"} need attention.`);
+  }
+
+  const count = (value: number) => (loading ? "—" : value);
+  const biometricCount = (value: number) =>
+    loading || !enrollmentStatusAvailable ? "—" : value;
 
   return (
-    <>
-      <section className="overview-hero">
-        <div>
-          <span className="eyebrow">
-            <Radio size={14} /> CONNECTED CAMPUS · PROTOTYPE
-          </span>
-          <h2>
-            Every presence.
-            <br />
-            <span>A clearer picture.</span>
-          </h2>
-          <p>
-            Your people, classes, and attendance in one workspace. Built for the
-            next step: a connected fingerprint terminal.
-          </p>
-          <button className="primary" onClick={() => onNavigate("attendance")}>
-            Open attendance <ArrowRight size={17} />
-          </button>
-        </div>
-        <div className="terminal-illustration" aria-hidden="true">
-          <div className="terminal-top">
-            <span className="dot" /> CAMPUSID <span>01</span>
-          </div>
-          <Fingerprint className="terminal-finger" strokeWidth={1} />
-          <div className="terminal-line" />
-          <strong>IDENTITY. CONNECTED.</strong>
-          <small>ESP32 + R307S</small>
-        </div>
-      </section>
-      <section
-        className="stats"
-        aria-label="Workspace counts"
-        aria-busy={loading}
-      >
-        {metrics.map(({ icon: Icon, label, value, detail }) => (
-          <div className="stat" key={label}>
-            <Icon aria-hidden="true" />
-            <small>{label}</small>
-            <strong>{loading ? "—" : value}</strong>
-            <p>{detail}</p>
-          </div>
-        ))}
-      </section>
-      <section className="panel device-status-card">
-        <div className="section-heading">
+    <div className="overview-dashboard">
+      <section className="panel overview-panel" aria-labelledby="system-status-title">
+        <div className="overview-panel-heading">
           <div>
-            <span className="eyebrow">DEVICE HEALTH</span>
-            <h2>{device?.display_name || "CampusID Terminal 01"}</h2>
+            <span className="eyebrow">SYSTEM STATUS</span>
+            <h2 id="system-status-title">Fingerprint terminal</h2>
           </div>
-          <Radio size={20} />
+          <Radio aria-hidden="true" size={19} />
         </div>
-        {deviceError ? (
-          <p className="system-note">{deviceError}</p>
-        ) : (
-          <>
-            <div className="device-status-heading">
-              <span
-                className={`status-dot ${terminalOnline ? "" : "offline"}`}
-              />
-              <strong>{terminalOnline ? "ONLINE" : "OFFLINE"}</strong>
+        <div className="overview-system-grid" aria-busy={loading}>
+          <div className="overview-system-item">
+            <small>Terminal</small>
+            <strong className={terminalOnline ? "state-good" : "state-attention"}>
+              {!device ? "Not configured" : terminalOnline ? "Online" : "Offline"}
+            </strong>
+          </div>
+          <div className="overview-system-item">
+            <small>Fingerprint sensor</small>
+            <strong className={device?.sensor_ready ? "state-good" : "state-attention"}>
+              {device ? (device.sensor_ready ? "Ready" : "Unavailable") : "Unknown"}
+            </strong>
+          </div>
+          <div className="overview-system-item">
+            <small>Last heartbeat</small>
+            <strong>{formatLastSeen(device?.last_seen_at || null, now)}</strong>
+          </div>
+          {device && (
+            <div className="overview-device-code">
+              {device.display_name} · {device.device_code}
             </div>
-            <div className="device-health-grid">
-              <div>
-                <small>Fingerprint sensor</small>
-                <b>{device?.sensor_ready ? "Ready" : "Not ready"}</b>
-              </div>
-              <div>
-                <small>Last seen</small>
-                <b>{formatLastSeen(device?.last_seen_at || null, now)}</b>
-              </div>
-              <div>
-                <small>Pending sync</small>
-                <b>{device?.pending_event_count ?? 0}</b>
-              </div>
-              <div>
-                <small>Firmware</small>
-                <b>{device?.firmware_version || "—"}</b>
-              </div>
-            </div>
-          </>
-        )}
+          )}
+        </div>
       </section>
-      <div className="overview-grid">
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">YOUR WORKFLOW</span>
-              <h2>
-                {isAdmin
-                  ? "From roster to attendance"
-                  : "Ready for your next class"}
-              </h2>
-            </div>
-            <BookOpen size={20} />
+
+      <section className="panel overview-panel" aria-labelledby="campus-summary-title">
+        <div className="overview-panel-heading">
+          <div>
+            <span className="eyebrow">CAMPUS SUMMARY</span>
+            <h2 id="campus-summary-title">Records</h2>
           </div>
-          <div className="workflow-steps">
-            {(isAdmin ? steps : steps.slice(2)).map((step, index) => (
-              <button
-                className="workflow-step"
-                onClick={() => onNavigate(step.tab)}
-                key={step.title}
-              >
-                <span
-                  className={`step-number ${step.complete ? "complete" : ""}`}
-                >
-                  {step.complete ? (
-                    <Check size={17} />
-                  ) : (
-                    String(index + 1).padStart(2, "0")
-                  )}
-                </span>
-                <span>
-                  <b>{step.title}</b>
-                  <small>{step.detail}</small>
-                </span>
-                <ArrowRight size={17} />
-              </button>
-            ))}
+          <Users aria-hidden="true" size={19} />
+        </div>
+        <div className="overview-count-grid" aria-busy={loading}>
+          <div className="overview-count-item">
+            <small>Students</small>
+            <strong>{count(students.length)}</strong>
+          </div>
+          <div className="overview-count-item">
+            <small>Teachers</small>
+            <strong>{count(teachers.length)}</strong>
+          </div>
+          <div className="overview-count-item">
+            <small>{isAdmin ? "Classes" : "Assigned classes"}</small>
+            <strong>{count(classes.length)}</strong>
+          </div>
+        </div>
+      </section>
+
+      {isAdmin && (
+        <section className="panel overview-panel" aria-labelledby="biometric-operations-title">
+          <div className="overview-panel-heading">
+            <div>
+              <span className="eyebrow">BIOMETRIC OPERATIONS</span>
+              <h2 id="biometric-operations-title">Current status</h2>
+            </div>
+            <Fingerprint aria-hidden="true" size={19} />
+          </div>
+          <div className="overview-count-grid overview-biometric-grid" aria-busy={loading || !enrollmentStatusAvailable}>
+            <div className="overview-count-item">
+              <small>Enrolled students</small>
+              <strong>{biometricCount(enrolled)}</strong>
+            </div>
+            <div className="overview-count-item">
+              <small>Pending enrollment</small>
+              <strong>{biometricCount(pendingEnrollment)}</strong>
+            </div>
+            <div className="overview-count-item">
+              <small>Fingerprint removal</small>
+              <strong>{biometricCount(pendingRemoval)}</strong>
+            </div>
+            <div className="overview-count-item">
+              <small>Needs attention</small>
+              <strong className={failedStatuses.length ? "state-attention" : ""}>
+                {biometricCount(failedStatuses.length)}
+              </strong>
+            </div>
           </div>
         </section>
-        <section className="panel system-panel">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">SYSTEM READINESS</span>
-              <h2>Connected, with clarity</h2>
-            </div>
-            <Cpu size={20} />
+      )}
+
+      {attention.length > 0 ? (
+        <section className="overview-attention" aria-labelledby="overview-attention-title">
+          <AlertTriangle aria-hidden="true" size={18} />
+          <div>
+            <h2 id="overview-attention-title">Needs attention</h2>
+            <ul>
+              {attention.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+            {failedStatuses.map((status) => {
+              const student = students.find((person) => person.id === status.person_id);
+              return status.error_message ? (
+                <p key={status.command_id || status.person_id}>
+                  {student?.full_name ? `${student.full_name}: ` : ""}{status.error_message}
+                </p>
+              ) : null;
+            })}
           </div>
-          <div className="system-row">
-            <span>
-              <ShieldCheck size={18} /> Database
-            </span>
-            <span className={`badge ${connected ? "success" : "warning"}`}>
-              {loading ? "Checking" : connected ? "Connected" : "Unavailable"}
-            </span>
-          </div>
-          <div className="system-row">
-            <span>
-              <Fingerprint size={18} /> Fingerprint terminal
-            </span>
-            <span
-              className={`badge ${
-                terminalReadiness === "connected"
-                  ? "success"
-                  : terminalReadiness === "offline"
-                    ? "warning"
-                    : "neutral"
-              }`}
-            >
-              {terminalReadiness === "connected"
-                ? "Connected"
-                : terminalReadiness === "offline"
-                  ? "Offline"
-                  : "Not integrated"}
-            </span>
-          </div>
-          <div className="system-row">
-            <span>
-              <Radio size={18} /> Offline sync
-            </span>
-            <span className="badge neutral">Planned</span>
-          </div>
-          <p className="system-note">
-            Manual attendance is available now. Terminal recognition runs
-            locally; cloud enrollment and sync are the next milestone.
-          </p>
         </section>
-      </div>
-    </>
+      ) : connected && device && terminalOnline && device.sensor_ready && enrollmentStatusAvailable ? (
+        <p className="overview-operational" role="status">
+          <CheckCircle2 aria-hidden="true" size={17} /> All systems operational
+        </p>
+      ) : null}
+    </div>
   );
 }

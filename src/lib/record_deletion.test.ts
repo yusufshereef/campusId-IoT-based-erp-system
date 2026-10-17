@@ -1,29 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { databaseError } from "./admin";
 import type { CampusClass, Person } from "./types";
-import {
-    confirmRecordDeletion,
-    withoutClass,
-    withoutPerson,
-} from "./record_deletion";
+import { withoutClass, withoutPerson } from "./record_deletion";
 
-describe("safe record deletion UI helpers", () => {
-    it("requires the exact destructive confirmation for each record type", () => {
-        const confirm = vi.fn(() => false);
-        expect(confirmRecordDeletion("student", confirm)).toBe(false);
-        expect(confirm).toHaveBeenLastCalledWith(
-            "Delete student?\nThis permanently removes this student record. This cannot be undone.",
-        );
-        expect(confirmRecordDeletion("teacher", confirm)).toBe(false);
-        expect(confirm).toHaveBeenLastCalledWith(
-            "Delete teacher?\nThis permanently removes this teacher record.",
-        );
-        expect(confirmRecordDeletion("class", confirm)).toBe(false);
-        expect(confirm).toHaveBeenLastCalledWith(
-            "Delete class?\nThis permanently removes this class.",
-        );
-    });
-
+describe("record deletion list updates", () => {
     it("removes only the deleted row from local lists", () => {
         const people = [{ id: "student-1" }, { id: "teacher-1" }] as Person[];
         const classes = [{ id: "class-1" }, { id: "class-2" }] as CampusClass[];
