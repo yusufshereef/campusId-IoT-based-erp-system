@@ -22,6 +22,7 @@ import {
   validatePersonInput,
 } from "./lib/admin";
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
+import { ActionMenu } from "./components/ActionMenu";
 import { DestructiveConfirmationModal } from "./components/DestructiveConfirmationModal";
 import { Overview } from "./components/Overview";
 import { DEVICE_REFRESH_INTERVAL_MS, deviceStatus } from "./lib/device_status";
@@ -878,7 +879,7 @@ export default function App() {
           </div>
           <div>
             <b>CampusID</b>
-            <small>ATTENDANCE SYSTEM</small>
+            <small>ATTENDANCE ERP</small>
           </div>
         </div>
         <p className="navlabel">WORKSPACE</p>
@@ -887,9 +888,6 @@ export default function App() {
             [
               ["overview", "Overview", LayoutDashboard],
               ["attendance", "Attendance", CalendarDays],
-              ["classes", "Classes", BookOpen],
-              ["students", "Students", GraduationCap],
-              ["teachers", "Teachers", Users],
             ] as const
           ).map(([id, label, Icon]) => (
             <button
@@ -898,7 +896,27 @@ export default function App() {
               onClick={() => navigate(id)}
               aria-current={tab === id ? "page" : undefined}
             >
-              <Icon size={18} />
+              <Icon size={16} />
+              {label}
+            </button>
+          ))}
+        </nav>
+        <p className="navlabel">PEOPLE</p>
+        <nav aria-label="People navigation">
+          {(
+            [
+              ["students", "Students", GraduationCap],
+              ["teachers", "Teachers", Users],
+              ["classes", "Classes", BookOpen],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              className={"nav " + (tab === id ? "chosen" : "")}
+              onClick={() => navigate(id)}
+              aria-current={tab === id ? "page" : undefined}
+            >
+              <Icon size={16} />
               {label}
             </button>
           ))}
@@ -927,18 +945,17 @@ export default function App() {
         </div>
       </aside>
       <main id="main-content" tabIndex={-1}>
-        <header>
-          <span>
-            Workspace <i>/</i> <b>{title}</b>
-          </span>
-          <label className={dbConnected ? "good" : "warn"}>
+        <header className="topbar">
+          <h1 className="topbar-title">{title}</h1>
+          <div className="topbar-actions">
+          <span className={dbConnected ? "good" : "warn"} role="status">
             {dbConnected ? <Wifi size={15} /> : <WifiOff size={15} />}{" "}
             {dbConnected
               ? "Database connected"
               : configured
                 ? "Database unavailable"
                 : "Database not configured"}
-          </label>
+          </span>
           <button
             className="refresh"
             onClick={() => void refresh()}
@@ -948,14 +965,11 @@ export default function App() {
           >
             <RefreshCw size={16} className={busy ? "spin" : ""} />
           </button>
+          </div>
         </header>
         <div className="content">
           <div className="heading">
-            <div>
-              <small>CAMPUS WORKSPACE</small>
-              <h1>{title}</h1>
-              <p>{descriptions[tab]}</p>
-            </div>
+            <p>{descriptions[tab]}</p>
           </div>
           {notice && (
             <div
@@ -1062,13 +1076,9 @@ export default function App() {
                         </td>
                         {userRole === "administrator" && (
                           <td>
-                            <button
-                              className="outline danger"
-                              onClick={(event) => deleteClass(c, event.currentTarget)}
-                              disabled={busy}
-                            >
-                              Delete
-                            </button>
+                            <ActionMenu label={`Actions for ${c.name} ${c.section}`}>
+                              <button role="menuitem" className="menu-danger" onClick={(event) => deleteClass(c, event.currentTarget)} disabled={busy}>Delete class</button>
+                            </ActionMenu>
                           </td>
                         )}
                       </tr>
@@ -1215,9 +1225,9 @@ export default function App() {
                     <thead>
                       <tr>
                         <th scope="col">Name / ID</th>
-                        <th scope="col">Role</th>
-                        <th scope="col">Class assignment</th>
-                        <th scope="col">Fingerprint status</th>
+                      {tab === "students" && <th scope="col">Role</th>}
+                      <th scope="col">Class assignment</th>
+                      {tab === "students" && <th scope="col">Fingerprint status</th>}
                         <th scope="col">Account</th>
                         {userRole === "administrator" && (
                           <th scope="col">Action</th>
@@ -1233,7 +1243,7 @@ export default function App() {
                               {p.roll_number || p.employee_id}
                             </small>
                           </td>
-                          <td>{p.role}</td>
+                          {tab === "students" && <td>{p.role}</td>}
                           <td>
                             {p.role === "student"
                               ? p.classes
@@ -1247,7 +1257,7 @@ export default function App() {
                                   .filter(Boolean)
                                   .join(", ") || "No classes"}
                           </td>
-                          <td>
+                          {tab === "students" && <td>
                             {(() => {
                               const status = enrollmentStatuses[p.id];
                               const enrollmentStatus =
@@ -1255,59 +1265,12 @@ export default function App() {
                                 p.fingerprint_status;
                               return (
                                 <>
-                                  <span className="fingerprint-status">
+                                  <span className={`fingerprint-status status-${enrollmentStatus}`}>
                                     {enrollmentStatus.replace("_", " ")}
                                     {status?.slot_id
                                       ? ` · Template #${status.slot_id}`
                                       : ""}
                                   </span>
-                                  {p.role === "student" &&
-                                    userRole === "administrator" &&
-                                    enrollmentStatus !== "enrolled" &&
-                                    enrollmentStatus !== "student_delete_failed" && (
-                                      <button
-                                        className="outline"
-                                        onClick={() =>
-                                          void requestEnrollment(p)
-                                        }
-                                        disabled={
-                                          busy ||
-                                          ["in_progress", "delete_processing"].includes(enrollmentStatus) ||
-                                          !terminalOnline
-                                        }
-                                        title={
-                                          terminalOnline
-                                            ? "Enroll fingerprint"
-                                            : "Terminal offline"
-                                        }
-                                      >
-                                        {enrollmentStatus === "failed"
-                                          ? "Retry enrollment"
-                                          : "Enroll fingerprint"}
-                                      </button>
-                                    )}
-                                  {p.role === "student" &&
-                                    userRole === "administrator" &&
-                                    enrollmentStatus === "enrolled" && (
-                                      <>
-                                        <button
-                                          className="outline danger"
-                                          onClick={(event) => requestFingerprintDeletion(p, "remove", event.currentTarget)}
-                                          disabled={busy || !terminalOnline}
-                                          title={terminalOnline ? "Remove fingerprint" : "Terminal offline"}
-                                        >
-                                          Delete fingerprint
-                                        </button>
-                                        <button
-                                          className="outline"
-                                          onClick={(event) => requestFingerprintDeletion(p, "reenroll", event.currentTarget)}
-                                          disabled={busy || !terminalOnline}
-                                          title={terminalOnline ? "Remove the old template before enrolling again" : "Terminal offline"}
-                                        >
-                                          Re-enroll fingerprint
-                                        </button>
-                                      </>
-                                    )}
                                   {enrollmentStatus === "delete_processing" && (
                                     <small className="block">Terminal is removing this template…</small>
                                   )}
@@ -1328,7 +1291,7 @@ export default function App() {
                                 </>
                               );
                             })()}
-                          </td>
+                          </td>}
                           <td>
                             <span className={p.active ? "active" : "inactive"}>
                               {p.active ? "Active" : "Inactive"}
@@ -1336,24 +1299,18 @@ export default function App() {
                           </td>
                           {userRole === "administrator" && (
                             <td>
-                              <div className="row-actions">
-                                <button
-                                  className="outline"
-                                  onClick={() => void activeToggle(p)}
-                                  disabled={busy}
-                                >
-                                  {p.active ? "Deactivate" : "Activate"}
-                                </button>
-                                <button
-                                  className="outline danger"
-                                  onClick={(event) => p.role === "student"
-                                    ? deleteStudent(p, event.currentTarget)
-                                    : deleteTeacher(p, event.currentTarget)}
-                                  disabled={busy}
-                                >
-                                  Delete
-                                </button>
-                              </div>
+                              <ActionMenu label={`Actions for ${p.full_name}`}>
+                                {p.role === "student" && (() => {
+                                  const status = enrollmentStatuses[p.id];
+                                  const enrollmentStatus = status?.enrollment_status || p.fingerprint_status;
+                                  return enrollmentStatus === "enrolled" ? <>
+                                    <button role="menuitem" disabled={busy || !terminalOnline} title={terminalOnline ? "Remove fingerprint" : "Terminal offline"} onClick={(event) => requestFingerprintDeletion(p, "remove", event.currentTarget)}>Delete fingerprint</button>
+                                    <button role="menuitem" disabled={busy || !terminalOnline} title={terminalOnline ? "Remove old template before enrolling again" : "Terminal offline"} onClick={(event) => requestFingerprintDeletion(p, "reenroll", event.currentTarget)}>Re-enroll fingerprint</button>
+                                  </> : enrollmentStatus !== "student_delete_failed" && <button role="menuitem" disabled={busy || !terminalOnline || ["in_progress", "delete_processing"].includes(enrollmentStatus)} onClick={() => void requestEnrollment(p)}>{enrollmentStatus === "failed" ? "Retry enrollment" : "Enroll fingerprint"}</button>;
+                                })()}
+                                <button role="menuitem" disabled={busy} onClick={() => void activeToggle(p)}>{p.active ? "Deactivate" : "Activate"}</button>
+                                <button role="menuitem" className="menu-danger" disabled={busy} onClick={(event) => p.role === "student" ? deleteStudent(p, event.currentTarget) : deleteTeacher(p, event.currentTarget)}>Delete {p.role}</button>
+                              </ActionMenu>
                             </td>
                           )}
                         </tr>

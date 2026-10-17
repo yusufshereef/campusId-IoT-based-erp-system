@@ -1,4 +1,12 @@
-import { AlertTriangle, CheckCircle2, Fingerprint, Radio, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  Fingerprint,
+  GraduationCap,
+  Radio,
+  Users,
+} from "lucide-react";
 import type { CampusClass, Device, EnrollmentStatus, Person } from "../lib/types";
 import { deviceStatus, formatLastSeen } from "../lib/device_status";
 
@@ -41,6 +49,9 @@ export function Overview({
   const pendingEnrollment = statuses.filter((status) => status.enrollment_status === "in_progress").length;
   const pendingRemoval = statuses.filter((status) => status.enrollment_status === "delete_processing").length;
   const failedStatuses = statuses.filter((status) => failureStates.has(status.enrollment_status));
+  const count = (value: number) => (loading ? "—" : value);
+  const biometricCount = (value: number) =>
+    loading || !enrollmentStatusAvailable ? "—" : value;
 
   const attention: string[] = [];
   if (deviceError) attention.push(`Terminal status could not be read: ${deviceError}`);
@@ -51,109 +62,92 @@ export function Overview({
     attention.push(`${failedStatuses.length} biometric operation${failedStatuses.length === 1 ? "" : "s"} need attention.`);
   }
 
-  const count = (value: number) => (loading ? "—" : value);
-  const biometricCount = (value: number) =>
-    loading || !enrollmentStatusAvailable ? "—" : value;
-
   return (
     <div className="overview-dashboard">
-      <section className="panel overview-panel" aria-labelledby="system-status-title">
-        <div className="overview-panel-heading">
-          <div>
-            <span className="eyebrow">SYSTEM STATUS</span>
-            <h2 id="system-status-title">Fingerprint terminal</h2>
-          </div>
-          <Radio aria-hidden="true" size={19} />
+      <section className="overview-metrics" aria-label="Campus summary" aria-busy={loading}>
+        <div className="overview-metric">
+          <div><GraduationCap aria-hidden="true" size={16} /><small>Students</small></div>
+          <strong>{count(students.length)}</strong>
         </div>
-        <div className="overview-system-grid" aria-busy={loading}>
-          <div className="overview-system-item">
-            <small>Terminal</small>
-            <strong className={terminalOnline ? "state-good" : "state-attention"}>
-              {!device ? "Not configured" : terminalOnline ? "Online" : "Offline"}
-            </strong>
-          </div>
-          <div className="overview-system-item">
-            <small>Fingerprint sensor</small>
-            <strong className={device?.sensor_ready ? "state-good" : "state-attention"}>
-              {device ? (device.sensor_ready ? "Ready" : "Unavailable") : "Unknown"}
-            </strong>
-          </div>
-          <div className="overview-system-item">
-            <small>Last heartbeat</small>
-            <strong>{formatLastSeen(device?.last_seen_at || null, now)}</strong>
-          </div>
-          {device && (
-            <div className="overview-device-code">
-              {device.display_name} · {device.device_code}
-            </div>
-          )}
+        <div className="overview-metric">
+          <div><Users aria-hidden="true" size={16} /><small>Teachers</small></div>
+          <strong>{count(teachers.length)}</strong>
         </div>
+        <div className="overview-metric">
+          <div><BookOpen aria-hidden="true" size={16} /><small>{isAdmin ? "Classes" : "Assigned classes"}</small></div>
+          <strong>{count(classes.length)}</strong>
+        </div>
+        {isAdmin && (
+          <div className="overview-metric">
+            <div><Fingerprint aria-hidden="true" size={16} /><small>Enrolled fingerprints</small></div>
+            <strong>{biometricCount(enrolled)}</strong>
+          </div>
+        )}
       </section>
 
-      <section className="panel overview-panel" aria-labelledby="campus-summary-title">
-        <div className="overview-panel-heading">
-          <div>
-            <span className="eyebrow">CAMPUS SUMMARY</span>
-            <h2 id="campus-summary-title">Records</h2>
-          </div>
-          <Users aria-hidden="true" size={19} />
-        </div>
-        <div className="overview-count-grid" aria-busy={loading}>
-          <div className="overview-count-item">
-            <small>Students</small>
-            <strong>{count(students.length)}</strong>
-          </div>
-          <div className="overview-count-item">
-            <small>Teachers</small>
-            <strong>{count(teachers.length)}</strong>
-          </div>
-          <div className="overview-count-item">
-            <small>{isAdmin ? "Classes" : "Assigned classes"}</small>
-            <strong>{count(classes.length)}</strong>
-          </div>
-        </div>
-      </section>
-
-      {isAdmin && (
-        <section className="panel overview-panel" aria-labelledby="biometric-operations-title">
+      <div className="overview-main-grid">
+        <section className="panel overview-panel" aria-labelledby="system-status-title">
           <div className="overview-panel-heading">
             <div>
-              <span className="eyebrow">BIOMETRIC OPERATIONS</span>
-              <h2 id="biometric-operations-title">Current status</h2>
+              <span className="eyebrow">SYSTEM STATUS</span>
+              <h2 id="system-status-title">Fingerprint terminal</h2>
             </div>
-            <Fingerprint aria-hidden="true" size={19} />
+            <Radio aria-hidden="true" size={17} />
           </div>
-          <div className="overview-count-grid overview-biometric-grid" aria-busy={loading || !enrollmentStatusAvailable}>
-            <div className="overview-count-item">
-              <small>Enrolled students</small>
-              <strong>{biometricCount(enrolled)}</strong>
-            </div>
-            <div className="overview-count-item">
-              <small>Pending enrollment</small>
-              <strong>{biometricCount(pendingEnrollment)}</strong>
-            </div>
-            <div className="overview-count-item">
-              <small>Fingerprint removal</small>
-              <strong>{biometricCount(pendingRemoval)}</strong>
-            </div>
-            <div className="overview-count-item">
-              <small>Needs attention</small>
-              <strong className={failedStatuses.length ? "state-attention" : ""}>
-                {biometricCount(failedStatuses.length)}
+          <div className="overview-system-list" aria-busy={loading}>
+            <div className="overview-system-row">
+              <span>Terminal</span>
+              <strong className={terminalOnline ? "state-good" : "state-attention"}>
+                {!device ? "Not configured" : terminalOnline ? "Online" : "Offline"}
               </strong>
             </div>
+            <div className="overview-system-row">
+              <span>Fingerprint sensor</span>
+              <strong className={device?.sensor_ready ? "state-good" : "state-attention"}>
+                {device ? (device.sensor_ready ? "Ready" : "Unavailable") : "Unknown"}
+              </strong>
+            </div>
+            <div className="overview-system-row">
+              <span>Last heartbeat</span>
+              <strong>{formatLastSeen(device?.last_seen_at || null, now)}</strong>
+            </div>
+            {device && (
+              <small className="overview-device-code">
+                {device.device_code} · {device.firmware_version || "Firmware version unavailable"}
+              </small>
+            )}
           </div>
         </section>
-      )}
+
+        {isAdmin && (
+          <section className="panel overview-panel" aria-labelledby="biometric-operations-title">
+            <div className="overview-panel-heading">
+              <div>
+                <span className="eyebrow">BIOMETRIC OPERATIONS</span>
+                <h2 id="biometric-operations-title">Current status</h2>
+              </div>
+              <Fingerprint aria-hidden="true" size={17} />
+            </div>
+            <div className="overview-operation-list" aria-busy={loading || !enrollmentStatusAvailable}>
+              <div><span>Pending enrollment</span><strong>{biometricCount(pendingEnrollment)}</strong></div>
+              <div><span>Fingerprint removal</span><strong>{biometricCount(pendingRemoval)}</strong></div>
+              <div>
+                <span>Failed / attention required</span>
+                <strong className={failedStatuses.length ? "state-attention" : ""}>
+                  {biometricCount(failedStatuses.length)}
+                </strong>
+              </div>
+            </div>
+          </section>
+        )}
+      </div>
 
       {attention.length > 0 ? (
         <section className="overview-attention" aria-labelledby="overview-attention-title">
-          <AlertTriangle aria-hidden="true" size={18} />
+          <AlertTriangle aria-hidden="true" size={17} />
           <div>
             <h2 id="overview-attention-title">Needs attention</h2>
-            <ul>
-              {attention.map((item) => <li key={item}>{item}</li>)}
-            </ul>
+            <ul>{attention.map((item) => <li key={item}>{item}</li>)}</ul>
             {failedStatuses.map((status) => {
               const student = students.find((person) => person.id === status.person_id);
               return status.error_message ? (
@@ -166,7 +160,7 @@ export function Overview({
         </section>
       ) : connected && device && terminalOnline && device.sensor_ready && enrollmentStatusAvailable ? (
         <p className="overview-operational" role="status">
-          <CheckCircle2 aria-hidden="true" size={17} /> All systems operational
+          <CheckCircle2 aria-hidden="true" size={16} /> All systems operational
         </p>
       ) : null}
     </div>

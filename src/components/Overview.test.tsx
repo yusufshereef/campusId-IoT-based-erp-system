@@ -93,7 +93,7 @@ describe("operational overview", () => {
     expect(markup).toContain(">2<");
     expect(markup).toContain("Teachers");
     expect(markup).toContain("Classes");
-    expect(markup).toContain("CAMPUS SUMMARY");
+    expect(markup).toContain("Enrolled fingerprints");
     expect(markup).not.toContain("Planned");
   });
 
@@ -123,8 +123,8 @@ describe("operational overview", () => {
     const markup = renderOverview({
       enrollmentStatuses: Object.fromEntries(rows.map((row) => [row.person_id, row])),
     });
-    expect(markup).toContain("Enrolled students");
-    expect(markup.match(/Enrolled students<\/small><strong>1<\/strong>/)).not.toBeNull();
+    expect(markup).toContain("Enrolled fingerprints");
+    expect(markup.match(/Enrolled fingerprints<\/small><\/div><strong>1<\/strong>/)).not.toBeNull();
     expect(markup).toContain("Pending enrollment");
     expect(markup).toContain("Fingerprint removal");
     expect(markup).not.toContain("Pending cleanup");
