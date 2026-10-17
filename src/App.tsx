@@ -1205,7 +1205,8 @@ export default function App() {
                                   </span>
                                   {p.role === "student" &&
                                     userRole === "administrator" &&
-                                    enrollmentStatus !== "enrolled" && (
+                                    enrollmentStatus !== "enrolled" &&
+                                    enrollmentStatus !== "student_delete_failed" && (
                                       <button
                                         className="outline"
                                         onClick={() =>
@@ -1254,6 +1255,11 @@ export default function App() {
                                   )}
                                   {enrollmentStatus === "delete_failed" && (
                                     <small className="block">Removal failed. The fingerprint remains enrolled.</small>
+                                  )}
+                                  {enrollmentStatus === "student_delete_failed" && (
+                                    <small className="block">
+                                      {status?.error_message || "Fingerprint removed, but student record could not be deleted. Retry Delete."}
+                                    </small>
                                   )}
                                   {enrollmentStatus === "failed" &&
                                     status?.error_message && (

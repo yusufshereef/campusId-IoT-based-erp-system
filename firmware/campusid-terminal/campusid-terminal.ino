@@ -40,6 +40,10 @@ String active_enrollment_command_id;
 String active_command_type;
 bool enrollment_ack_pending = false;
 bool enrollment_ack_success = false;
+bool delete_execution_active = false;
+uint8_t delete_result_state = 0;  // 1 = confirmed success, 2 = failure.
+uint32_t delete_result_at = 0;
+constexpr uint32_t DeleteResultHoldMs = 4000;
 uint16_t enrollment_ack_template_id = 0;
 String enrollment_ack_error;
 uint32_t next_enrollment_ack = 0;
@@ -115,8 +119,13 @@ void draw_home() {
   const char* title = "TERMINAL READY";
   uint16_t color = CampusIdDisplay::Success;
   if (active_command_type == "DELETE_FINGERPRINT") {
-    title = enrollment_ack_success ? "DELETE CONFIRMING" : "DELETE FAILED";
-    color = enrollment_ack_success ? CampusIdDisplay::Accent : CampusIdDisplay::Error;
+    title = delete_execution_active ? "REMOVING"
+        : enrollment_ack_success ? "SUCCESS" : "FAILURE";
+    color = delete_execution_active ? CampusIdDisplay::Accent
+        : enrollment_ack_success ? CampusIdDisplay::Success : CampusIdDisplay::Error;
+  } else if (delete_result_state != 0) {
+    title = delete_result_state == 1 ? "SUCCESS" : "FAILURE";
+    color = delete_result_state == 1 ? CampusIdDisplay::Success : CampusIdDisplay::Error;
   } else if (enrollment != EnrollmentState::Idle) {
     switch (enrollment) {
       case EnrollmentState::PreparingEnrollment: title = "PREPARING"; break;
@@ -160,7 +169,13 @@ void draw_home() {
   if (active_command_type == "DELETE_FINGERPRINT") {
     display.text((String("Template #") + enrollment_ack_template_id).c_str(), 20, 185, 1,
                  CampusIdDisplay::Background);
-    display.text(enrollment_ack_success ? "Waiting for backend ACK" : enrollment_ack_error.c_str(),
+    display.text(delete_execution_active ? "Removing fingerprint"
+                 : enrollment_ack_success ? "Fingerprint removed"
+                 : "Could not remove fingerprint",
+                 20, 208, 1, CampusIdDisplay::Background);
+  } else if (delete_result_state != 0) {
+    display.text(delete_result_state == 1 ? "Fingerprint removed"
+                                          : "Could not remove fingerprint",
                  20, 208, 1, CampusIdDisplay::Background);
   } else if (enrollment != EnrollmentState::Idle) {
     display.text(fingerprint.enrollmentName().substring(0, 31).c_str(), 20, 185, 1,
@@ -495,12 +510,16 @@ void loop() {
     active_enrollment_command_id = command.id;
     active_command_type = command.command_type;
     if (command.command_type == "DELETE_FINGERPRINT") {
+      delete_result_state = 0;
+      delete_execution_active = true;
       enrollment_ack_template_id = command.reserved_slot;
       enrollment_ack_success = false;
       enrollment_ack_error = "Restart interrupted deletion; inspect terminal before retry";
       saveDeleteResult(false);
+      if (screen == Screen::Home || screen == Screen::DeviceStatus) render();
       String delete_error;
       enrollment_ack_success = fingerprint.deleteTemplate(command.reserved_slot, delete_error);
+      delete_execution_active = false;
       enrollment_ack_template_id = command.reserved_slot;
       enrollment_ack_error = delete_error;
       enrollment_ack_pending = true;
@@ -529,6 +548,7 @@ void loop() {
     if (acknowledgement != EnrollmentAckResult::Retry) {
       enrollment_ack_pending = false;
       active_enrollment_command_id = "";
+      const bool was_delete = active_command_type == "DELETE_FINGERPRINT";
       if (active_command_type == "DELETE_FINGERPRINT")
         lifecycle_preferences.putBool("pending", false);
       if (active_command_type == "ENROLL_FINGERPRINT") {
@@ -537,11 +557,22 @@ void loop() {
             (acknowledgement == EnrollmentAckResult::Failed && !enrollment_ack_success));
       }
       active_command_type = "";
+      if (was_delete) {
+        delete_result_state = enrollment_ack_success &&
+                acknowledgement == EnrollmentAckResult::Completed ? 1 : 2;
+        delete_result_at = millis();
+      }
       redraw = true;
       if (screen == Screen::Home || screen == Screen::DeviceStatus) render();
     } else {
       next_enrollment_ack = millis() + EnrollmentAckRetryMs;
     }
+  }
+  if (delete_result_state != 0 &&
+      millis() - delete_result_at >= DeleteResultHoldMs) {
+    delete_result_state = 0;
+    redraw = true;
+    if (screen == Screen::Home || screen == Screen::DeviceStatus) render();
   }
   if (!completed_enrollment_request && !maintenance_command_received &&
       !enrollment_capture_just_prepared) {
