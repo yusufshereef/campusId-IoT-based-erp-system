@@ -706,7 +706,7 @@ export default function App() {
         title: "Delete student?",
         description: "This permanently deletes this student and all associated CampusID data. This action cannot be undone.",
         expectedValue: confirmation.person.roll_number || "",
-        expectedPrompt: `Type the student's roll number to confirm: ${confirmation.person.roll_number || ""}`,
+        expectedPrompt: "Type the student's roll number to confirm:",
         confirmLabel: "Delete student",
         tone: "danger" as const,
       };
@@ -719,7 +719,7 @@ export default function App() {
         expectedValue: token,
         expectedPrompt: token === "DELETE"
           ? "Type DELETE to confirm:"
-          : `Type the teacher ID to confirm: ${token}`,
+          : "Type the teacher ID to confirm:",
         confirmLabel: "Delete teacher",
         tone: "danger" as const,
       };
@@ -730,7 +730,7 @@ export default function App() {
         title: "Delete class?",
         description: "This permanently deletes this class. This action cannot be undone.",
         expectedValue: code,
-        expectedPrompt: `Type the class code to confirm: ${code}`,
+        expectedPrompt: "Type the class code to confirm:",
         confirmLabel: "Delete class",
         tone: "danger" as const,
       };

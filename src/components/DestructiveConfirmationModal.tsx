@@ -75,7 +75,10 @@ export function DestructiveConfirmationModal({
         <p id="destructive-confirmation-description">{description}</p>
         {expectedValue !== undefined && (
           <>
-            <p>{expectedPrompt}</p>
+            <div className="confirmation-token-block">
+              <p>{expectedPrompt}</p>
+              <code className="confirmation-token">{expectedValue}</code>
+            </div>
             <label>
               Confirmation
               <input

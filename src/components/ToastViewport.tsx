@@ -68,6 +68,12 @@ function Toast({
             >
                 <X size={15} aria-hidden="true" />
             </button>
+            <span className="toast-timer-track" aria-hidden="true">
+                <span
+                    className="toast-timer-fill"
+                    style={{ animationDuration: `${toastDuration(toast.kind)}ms` }}
+                />
+            </span>
         </div>
     );
 }

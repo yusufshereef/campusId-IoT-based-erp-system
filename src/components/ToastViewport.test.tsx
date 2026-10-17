@@ -14,6 +14,7 @@ describe("toast notifications", () => {
         expect(html).toContain("Class created");
         expect(html).toContain('role="status"');
         expect(html).toContain('aria-label="Dismiss notification"');
+        expect(html).toContain('class="toast-timer-fill" style="animation-duration:3500ms"');
     });
 
   it("stacks multiple notifications and uses longer error timing", () => {

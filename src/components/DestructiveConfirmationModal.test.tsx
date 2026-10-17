@@ -8,7 +8,7 @@ function renderModal(overrides: Partial<Parameters<typeof DestructiveConfirmatio
       title="Delete class?"
       description="This action cannot be undone."
       expectedValue="CSE-A"
-      expectedPrompt="Type the class code to confirm: CSE-A"
+      expectedPrompt="Type the class code to confirm:"
       confirmLabel="Delete class"
       tone="danger"
       loading={false}
@@ -23,7 +23,8 @@ function renderModal(overrides: Partial<Parameters<typeof DestructiveConfirmatio
 describe("destructive confirmation modal", () => {
   it("keeps typed destructive actions disabled until the exact token is entered", () => {
     const markup = renderModal();
-    expect(markup).toContain("Type the class code to confirm: CSE-A");
+    expect(markup).toContain("Type the class code to confirm:");
+    expect(markup).toContain('<code class="confirmation-token">CSE-A</code>');
     expect(markup).toContain('value=""');
     expect(markup).toContain("disabled=\"\">Delete class");
   });
