@@ -23,6 +23,9 @@ import {
 } from "./lib/admin";
 import { AttendanceWorkspace } from "./components/AttendanceWorkspace";
 import { ActionMenu } from "./components/ActionMenu";
+import { ToastViewport, type ToastItem } from "./components/ToastViewport";
+import { creationToastMessage } from "./lib/toast_messages";
+import { actionMenuItemClass } from "./lib/action_menu";
 import { DestructiveConfirmationModal } from "./components/DestructiveConfirmationModal";
 import { Overview } from "./components/Overview";
 import { DEVICE_REFRESH_INTERVAL_MS, deviceStatus } from "./lib/device_status";
@@ -66,6 +69,7 @@ export default function App() {
     [device, setDevice] = useState<Device | null>(null),
     [deviceError, setDeviceError] = useState<string | null>(null),
     [notice, setNotice] = useState<Notice | null>(null),
+    [toasts, setToasts] = useState<ToastItem[]>([]),
     [search, setSearch] = useState(""),
     [busy, setBusy] = useState(false),
     [dbConnected, setDbConnected] = useState(false),
@@ -83,6 +87,7 @@ export default function App() {
   const statusRefreshPending = useRef(false);
   const mutationPending = useRef(false);
   const confirmationReturnFocus = useRef<HTMLElement | null>(null);
+  const toastSequence = useRef(0);
   const [classNameInput, setClassNameInput] = useState(""),
     [section, setSection] = useState("A"),
     [year, setYear] = useState("2026-27"),
@@ -94,6 +99,13 @@ export default function App() {
     [password, setPassword] = useState("");
   function showNotice(message: string, kind: Notice["kind"] = "success") {
     setNotice({ message, kind });
+    if (sessionRef.current) {
+      const id = ++toastSequence.current;
+      setToasts((current) => [...current, { id, message, kind }].slice(-4));
+    }
+  }
+  function dismissToast(id: number) {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
   }
   const students = useMemo(
       () => people.filter((p) => p.role === "student"),
@@ -253,6 +265,7 @@ export default function App() {
       setConfirmationError(null);
       setDbConnected(false);
       setNotice(null);
+      setToasts([]);
       setPassword("");
       setTab("overview");
       setSearch("");
@@ -389,7 +402,7 @@ export default function App() {
         return;
       }
       setClassNameInput("");
-      showNotice("Class created.");
+      showNotice(creationToastMessage("class"));
       await refresh();
     } catch (error) {
       if (isCurrentSession(generation, session))
@@ -456,9 +469,7 @@ export default function App() {
       setIdentifier("");
       setStudentClass("");
       setTeacherClasses([]);
-      showNotice(
-        `${role === "student" ? "Student" : "Teacher"} registered. Hardware enrollment is not connected yet.`,
-      );
+      showNotice(creationToastMessage(role));
       await refresh();
     } catch (error) {
       if (isCurrentSession(generation, session))
@@ -541,7 +552,7 @@ export default function App() {
           delete next[action.person.id];
           return next;
         });
-        showNotice("Student deleted. Any required fingerprint cleanup will complete when the terminal is available.");
+        showNotice("Student deleted. Fingerprint cleanup will complete when the terminal is available.");
       } else if (action.kind === "teacher") {
         const { error } = await supabase.rpc("delete_teacher", { p_person_id: action.person.id });
         if (!isCurrentSession(generation, session)) return;
@@ -555,7 +566,7 @@ export default function App() {
           delete next[action.person.id];
           return next;
         });
-        showNotice(`${action.person.full_name} deleted.`);
+        showNotice("Teacher deleted");
       } else if (action.kind === "class") {
         const { error } = await supabase.rpc("delete_class", { p_class_id: action.classRecord.id });
         if (!isCurrentSession(generation, session)) return;
@@ -571,7 +582,7 @@ export default function App() {
           }
           return next;
         });
-        showNotice(`${action.classRecord.name}-${action.classRecord.section} deleted.`);
+        showNotice("Class deleted");
       } else {
         if (!terminalOnline) {
           setConfirmationError("CampusID terminal must be online to modify fingerprints.");
@@ -629,7 +640,7 @@ export default function App() {
         mutationPending.current,
       )
     ) {
-      if (!terminalOnline) showNotice("Terminal offline.", "error");
+      if (!terminalOnline) showNotice("Terminal offline.", "warning");
       return;
     }
     mutationPending.current = true;
@@ -971,15 +982,7 @@ export default function App() {
           <div className="heading">
             <p>{descriptions[tab]}</p>
           </div>
-          {notice && (
-            <div
-              className={`notice ${notice.kind}`}
-              role={notice.kind === "error" ? "alert" : "status"}
-            >
-              {notice.message}
-              <button onClick={() => setNotice(null)}>Dismiss</button>
-            </div>
-          )}
+          <ToastViewport toasts={toasts} onDismiss={dismissToast} />
           <div hidden={tab !== "attendance"}>
             <AttendanceWorkspace
               key={session.user.id}
@@ -1077,7 +1080,7 @@ export default function App() {
                         {userRole === "administrator" && (
                           <td>
                             <ActionMenu label={`Actions for ${c.name} ${c.section}`}>
-                              <button role="menuitem" className="menu-danger" onClick={(event) => deleteClass(c, event.currentTarget)} disabled={busy}>Delete class</button>
+                              <button role="menuitem" className={actionMenuItemClass(true)} onClick={(event) => deleteClass(c, event.currentTarget)} disabled={busy}>Delete class</button>
                             </ActionMenu>
                           </td>
                         )}
@@ -1309,7 +1312,7 @@ export default function App() {
                                   </> : enrollmentStatus !== "student_delete_failed" && <button role="menuitem" disabled={busy || !terminalOnline || ["in_progress", "delete_processing"].includes(enrollmentStatus)} onClick={() => void requestEnrollment(p)}>{enrollmentStatus === "failed" ? "Retry enrollment" : "Enroll fingerprint"}</button>;
                                 })()}
                                 <button role="menuitem" disabled={busy} onClick={() => void activeToggle(p)}>{p.active ? "Deactivate" : "Activate"}</button>
-                                <button role="menuitem" className="menu-danger" disabled={busy} onClick={(event) => p.role === "student" ? deleteStudent(p, event.currentTarget) : deleteTeacher(p, event.currentTarget)}>Delete {p.role}</button>
+                                <button role="menuitem" className={actionMenuItemClass(true)} disabled={busy} onClick={(event) => p.role === "student" ? deleteStudent(p, event.currentTarget) : deleteTeacher(p, event.currentTarget)}>Delete {p.role}</button>
                               </ActionMenu>
                             </td>
                           )}

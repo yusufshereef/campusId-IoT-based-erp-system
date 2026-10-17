@@ -40,5 +40,8 @@ export type EnrollmentStatus = {
 
 export type Tab =
   "overview" | "attendance" | "classes" | "students" | "teachers";
-export type Notice = { message: string; kind: "success" | "error" };
+export type Notice = {
+  message: string;
+  kind: "success" | "error" | "warning" | "info";
+};
 export type Notify = (message: string, kind?: Notice["kind"]) => void;
